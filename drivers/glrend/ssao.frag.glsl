@@ -72,8 +72,10 @@ void main() {
             continue;
         }
         float scene = linearDepth(texelFetch(uDepth, ivec2(q), 0).r);
-        float in_front = step(scene, -S.z - 0.02 * uRadius);
-        float in_range = smoothstep(0.0, 1.0, uRadius / max(abs(-P.z - scene), 0.0001));
+        float in_front = step(scene, -S.z - 0.08 * uRadius);
+        // only nearby occluders count: anything much nearer the eye than the radius (eg. a pedestrian
+        // sprite in front of a distant wall) would otherwise leave a dark halo around itself in the air
+        float in_range = 1.0 - smoothstep(uRadius, 2.0 * uRadius, abs(-P.z - scene));
         occlusion += in_front * in_range;
     }
     fragColour = vec4(1.0 - occlusion / float(SAMPLES));
