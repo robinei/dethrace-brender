@@ -241,6 +241,7 @@ br_device_pixelmap* DevicePixelmapGLAllocateFront(br_device* dev, br_output_faci
     self->asFront.video.fogDistance = pt.callbacks->fog_distance;
     self->asFront.video.distanceFade = pt.callbacks->distance_fade;
     self->asFront.video.textureGlow = pt.callbacks->texture_glow;
+    self->asFront.video.sceneLighting = pt.callbacks->scene_lighting;
 
     if (gladLoadGLLoader(DevicePixelmapGLGetGetProcAddress(self)) == 0) {
         BR_ERROR("GLREND: Unable to load OpenGL functions.");

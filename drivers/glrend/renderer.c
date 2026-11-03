@@ -121,6 +121,19 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
     glBindBufferBase(GL_UNIFORM_BUFFER, hVideo->brenderProgram.blockBindingModel, hVideo->brenderProgram.uboModel);
     glUniform1i(hVideo->brenderProgram.uniforms.main_texture, hVideo->brenderProgram.mainTextureBinding);
     glUniform1i(hVideo->brenderProgram.uniforms.glow_texture, 1);
+    {
+        float brightness = 1.0f;
+        const float* lights = NULL;
+        int count = hVideo->sceneLighting != NULL ? hVideo->sceneLighting(&brightness, &lights) : 0;
+        if (count > BR_GL_MAX_SCENE_LIGHTS) {
+            count = BR_GL_MAX_SCENE_LIGHTS;
+        }
+        glUniform1f(hVideo->brenderProgram.uniforms.scene_brightness, brightness);
+        glUniform1i(hVideo->brenderProgram.uniforms.num_spots, lights != NULL ? count : 0);
+        if (lights != NULL && count > 0) {
+            glUniform4fv(hVideo->brenderProgram.uniforms.spots, 2 * count, lights);
+        }
+    }
     glUniform1f(hVideo->brenderProgram.uniforms.glow_intensity, 0.0f);
     if (hVideo->post.active && hVideo->post.glowTex != 0) {
         /* light sources go to the glow attachment, for the post-processed bloom */

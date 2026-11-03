@@ -23,6 +23,7 @@ typedef struct _VIDEO {
     br_int_32 fogDistance;     /* Fog by distance, from fog_min to fully fogged at fog_max */
     br_device_gl_distancefade_cbfn* distanceFade;
     br_device_gl_textureglow_cbfn* textureGlow;
+    br_device_gl_scenelighting_cbfn* sceneLighting;
 
     struct {
         GLuint program;
@@ -59,6 +60,9 @@ typedef struct _VIDEO {
             GLint distance_fade;     /* float */
             GLint glow_texture;      /* sampler2D */
             GLint glow_intensity;    /* float */
+            GLint scene_brightness;  /* float */
+            GLint num_spots;         /* int */
+            GLint spots;             /* vec4[2 * MAX] */
         } uniforms;
 
         GLuint uboScene;

@@ -94,6 +94,32 @@ uniform bool alpha_to_coverage;
 // Glow mask of the texture (light source texels) and its strength; 0 for none
 uniform sampler2D glow_texture;
 uniform float glow_intensity;
+// Night: the scene is darkened to scene_brightness, except for light source texels, and lit by spot lights
+// (car headlights): position + range, then direction + strength, in view space
+#define MAX_SPOTS 32
+uniform float scene_brightness;
+uniform int num_spots;
+uniform vec4 spots[2 * MAX_SPOTS];
+// how much the spots light this fragment, also lifts the darkness depth cue
+float spotLight = 0.0;
+
+float spotLighting(vec3 p, vec3 n) {
+    float sum = 0.0;
+    for (int i = 0; i < num_spots; i++) {
+        vec3 to_light = spots[2 * i].xyz - p;
+        float d = length(to_light);
+        float range = spots[2 * i].w;
+        if (d >= range) {
+            continue;
+        }
+        vec3 l = to_light / max(d, 0.0001);
+        float cone = smoothstep(0.82, 0.95, dot(-l, spots[2 * i + 1].xyz));
+        float falloff = 1.0 - d / range;
+        float facing = dot(n, n) > 0.01 ? max(dot(n, l), 0.0) * 0.8 + 0.2 : 1.0;
+        sum += cone * falloff * falloff * facing * spots[2 * i + 1].w;
+    }
+    return sum;
+}
 // Fog by distance from the eye, from fog_min to fully fogged at fog_max
 uniform bool fog_distance;
 // Above 0: fade out (alpha) from this fraction of yon_z to yon_z, by distance from the eye
@@ -200,7 +226,11 @@ float doDistanceFog() {
         float t = clamp((d - fog_min) / max(fog_max - fog_min, 0.0001), 0.0, 1.0);
         // dense early like the original (about half at a quarter of the way), then easing into full fog
         float f = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
-        fragColour.rgb = mix(fragColour.rgb, fog_colour, f);
+        if (fog_colour == vec3(0.0)) {
+            // headlights reach into the darkness
+            f *= 1.0 - clamp(spotLight, 0.0, 1.0);
+        }
+        fragColour.rgb = mix(fragColour.rgb, fog_colour * scene_brightness, f);
         return f;
     }
     if (fog_enabled) {
@@ -272,6 +302,19 @@ void main() {
         fragColour.rgb = textureColour.rgb;
     }
 
+    float glowMask = 0.0;
+    if (glow_intensity > 0.0 && !disable_texture) {
+        glowMask = texture(glow_texture, mappedUV).r * glow_intensity;
+    }
+    if (scene_brightness < 1.0 || num_spots > 0) {
+        // night: dark, lit by the headlights (warm white), light sources keep their own brightness
+        if (num_spots > 0) {
+            spotLight = spotLighting(position.xyz, normalize(normal.xyz));
+        }
+        vec3 lit = fragColour.rgb * (scene_brightness + spotLight * vec3(1.0, 0.95, 0.82));
+        fragColour.rgb = mix(lit, textureColour.rgb, clamp(glowMask, 0.0, 1.0) * (1.0 - scene_brightness));
+    }
+
     /* Perform gamma correction */
 #if ENABLE_GAMMA_CORRECTION
     fragColour.rgb = pow(fragColour.rgb, vec3(1.0 / 1.2));
@@ -307,9 +350,8 @@ void main() {
     // Lights glow in their own (unlit) colour. Fog hides them; darkness only dims them a little, so lights
     // stand out in the distance at night
     glowColour = vec4(0.0, 0.0, 0.0, fragColour.a);
-    if (glow_intensity > 0.0 && !disable_texture) {
-        float g = texture(glow_texture, mappedUV).r * glow_intensity;
+    if (glowMask > 0.0) {
         float hidden = fog * (fog_colour == vec3(0.0) ? 0.4 : 1.0);
-        glowColour.rgb = textureColour.rgb * g * (1.0 - hidden);
+        glowColour.rgb = textureColour.rgb * glowMask * (1.0 - hidden);
     }
 }

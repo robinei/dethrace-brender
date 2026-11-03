@@ -38,6 +38,11 @@ typedef float BR_CALLBACK br_device_gl_distancefade_cbfn(void);
 // Optional. Light sources of a paletted texture, by its pixelmap identifier: sets `indices` to a 256 bit mask of
 // the palette indices that glow and, if `rect_count` is set non-zero, `rects` to x, y, width, height of the
 // areas they are limited to. Returns the glow intensity, 0 for none.
+// Optional. Queried at the start of each scene: sets `*brightness` (1 = normal, below 1 darkens the scene except
+// for light source texels, see texture_glow) and `*lights` to `count` spot lights of 8 floats each: view space
+// position, range, view space direction (normalised) and strength. Returns the light count.
+#define BR_GL_MAX_SCENE_LIGHTS 32
+typedef int BR_CALLBACK br_device_gl_scenelighting_cbfn(float *brightness, const float **lights);
 typedef float BR_CALLBACK br_device_gl_textureglow_cbfn(const char *identifier, const unsigned char **indices, const short **rects, int *rect_count);
 
 typedef struct br_device_gl_callback_procs {
@@ -51,6 +56,7 @@ typedef struct br_device_gl_callback_procs {
     br_device_gl_overlayregions_cbfn       *overlay_regions;
     br_device_gl_distancefade_cbfn         *distance_fade;
     br_device_gl_textureglow_cbfn          *texture_glow;
+    br_device_gl_scenelighting_cbfn        *scene_lighting;
     br_int_32                              fog_distance;    /* Non-zero: fog by distance, from fog_min to fully fogged at fog_max */
 } br_device_gl_callback_procs;
 
