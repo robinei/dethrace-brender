@@ -114,5 +114,10 @@ void main() {
     }
     // about half the disc rising at 45 degrees (a corner) darkens it by about two thirds
     occlusion *= 3.0 / float(SAMPLES);
+    // fading out in the distance, where it would only be noise: where the depth buffer's steps (24 bits, growing
+    // with the distance squared) come near the bias, or the disc is only a few pixels across
+    float z = -P.z;
+    float depth_step = z * z * (uFar - uNear) / (uNear * uFar * 16777216.0);
+    occlusion *= (1.0 - smoothstep(0.004 * uRadius, 0.015 * uRadius, depth_step)) * smoothstep(3.0, 8.0, disc);
     fragColour = vec4(max(0.0, 1.0 - occlusion));
 }
