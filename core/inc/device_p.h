@@ -26,6 +26,12 @@ typedef void BR_CALLBACK br_device_gl_getviewport_cbfn(int *x, int *y, float *wi
 // Optional. Called before rendering a scene into `target` with the viewport (in window pixels, bottom-left origin)
 // that will be used. The callback may modify the viewport, eg. to extend the 3d scene to fill a widescreen window.
 typedef void BR_CALLBACK br_device_gl_adjustrenderviewport_cbfn(br_pixelmap* target, int *x, int *y, int *width, int *height);
+// Optional. Regions of the 2d overlay to draw moved horizontally, eg. to put HUD elements at the edges of a
+// widescreen window. Sets `*regions` to `count` groups of 5 floats: left, top, right, bottom (overlay pixels,
+// exclusive right/bottom) and the horizontal shift (overlay pixels, may move them outside the overlay's 4:3 area).
+// The moved areas are not drawn at their original position. Returns the region count.
+#define BR_GL_MAX_OVERLAY_REGIONS 48
+typedef int BR_CALLBACK br_device_gl_overlayregions_cbfn(const float **regions);
 
 typedef struct br_device_gl_callback_procs {
     br_device_gl_getprocaddress_cbfn      *get_proc_address;
@@ -35,6 +41,7 @@ typedef struct br_device_gl_callback_procs {
     br_device_gl_adjustrenderviewport_cbfn *adjust_render_viewport;
     br_int_32                              texture_sharp;   /* Non-zero: unfiltered textures get anti-aliased texel edges */
     br_int_32                              texture_upscaler; /* 2x magnification of paletted textures: 0 = none, 1 = MMPX, 2 = xBR */
+    br_device_gl_overlayregions_cbfn       *overlay_regions;
 } br_device_gl_callback_procs;
 
 #endif

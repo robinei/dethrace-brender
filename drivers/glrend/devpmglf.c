@@ -126,10 +126,37 @@ static void SetupFullScreenRectGeometry(br_device_pixelmap* self) {
 
 void RenderFullScreenTextureToFrameBuffer(br_device_pixelmap* self, GLuint textureId, GLuint fb, int flipVertically, int discardPurplePixels) {
 
-    int x, y;
-    float width_m, height_m;
+    int x, y, i, region_count;
+    float width_m, height_m, margin;
+    const float* regions;
+    GLfloat rects[4 * BR_GL_MAX_OVERLAY_REGIONS];
+    GLfloat shifts[BR_GL_MAX_OVERLAY_REGIONS];
+
     DevicePixelmapGLGetViewport(self, &x, &y, &width_m, &height_m);
-    glViewport(x, y, self->pm_width * width_m, self->pm_height * height_m);
+
+    region_count = 0;
+    if (discardPurplePixels && self->asFront.callbacks.overlay_regions != NULL) {
+        region_count = self->asFront.callbacks.overlay_regions(&regions);
+        if (region_count > BR_GL_MAX_OVERLAY_REGIONS) {
+            region_count = BR_GL_MAX_OVERLAY_REGIONS;
+        }
+    }
+    margin = 0.f;
+    if (region_count > 0 && x > 0 && width_m > 0.f) {
+        // draw across the whole window width, so regions can move into the side areas
+        margin = x / width_m;
+        glViewport(0, y, 2 * x + (int)(self->pm_width * width_m + 0.5f), self->pm_height * height_m);
+        for (i = 0; i < region_count; i++) {
+            rects[4 * i + 0] = regions[5 * i + 0];
+            rects[4 * i + 1] = regions[5 * i + 1];
+            rects[4 * i + 2] = regions[5 * i + 2];
+            rects[4 * i + 3] = regions[5 * i + 3];
+            shifts[i] = regions[5 * i + 4];
+        }
+    } else {
+        region_count = 0;
+        glViewport(x, y, self->pm_width * width_m, self->pm_height * height_m);
+    }
 
     glDisable(GL_DEPTH_TEST);
     glBindTexture(GL_TEXTURE_2D, textureId);
@@ -139,6 +166,13 @@ void RenderFullScreenTextureToFrameBuffer(br_device_pixelmap* self, GLuint textu
     glUniform1f(self->asFront.video.defaultProgram.uFlipVertically, (float)flipVertically);
     glUniform1i(self->asFront.video.defaultProgram.uDiscardPurplePixels, discardPurplePixels);
     glUniform1i(self->asFront.video.defaultProgram.uSharp, self->asFront.video.textureSharp != 0);
+    glUniform1f(self->asFront.video.defaultProgram.uLayerWidth, self->pm_width + 2.f * margin);
+    glUniform1f(self->asFront.video.defaultProgram.uLayerMargin, margin);
+    glUniform1i(self->asFront.video.defaultProgram.uRegionCount, region_count);
+    if (region_count > 0) {
+        glUniform4fv(self->asFront.video.defaultProgram.uRegions, region_count, rects);
+        glUniform1fv(self->asFront.video.defaultProgram.uRegionShifts, region_count, shifts);
+    }
     if (self->asFront.video.textureSharp && discardPurplePixels) {
         // sharp sampling outputs premultiplied colour with partial coverage at cut-out edges
         glEnable(GL_BLEND);

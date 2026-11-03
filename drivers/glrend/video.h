@@ -31,6 +31,11 @@ typedef struct _VIDEO {
         GLint uFlipVertically;
         GLint uDiscardPurplePixels;
         GLint uSharp;
+        GLint uLayerWidth;
+        GLint uLayerMargin;
+        GLint uRegionCount;
+        GLint uRegions;
+        GLint uRegionShifts;
     } defaultProgram;
 
     struct {
