@@ -30,7 +30,7 @@ typedef void BR_CALLBACK br_device_gl_adjustrenderviewport_cbfn(br_pixelmap* tar
 // widescreen window. Sets `*regions` to `count` groups of 5 floats: left, top, right, bottom (overlay pixels,
 // exclusive right/bottom) and the horizontal shift (overlay pixels, may move them outside the overlay's 4:3 area).
 // The moved areas are not drawn at their original position. Returns the region count.
-#define BR_GL_MAX_OVERLAY_REGIONS 48
+#define BR_GL_MAX_OVERLAY_REGIONS 64
 typedef int BR_CALLBACK br_device_gl_overlayregions_cbfn(const float **regions);
 // Optional. Queried for each draw: when above 0, geometry fades out (to whatever was drawn behind it, eg. the
 // sky) between this fraction of the yon distance and the yon distance itself

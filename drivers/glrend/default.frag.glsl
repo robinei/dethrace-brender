@@ -19,8 +19,9 @@ uniform int uSharp;
 // The quad spans uLayerWidth overlay pixels, starting uLayerMargin pixels left of the overlay (0 = just the overlay)
 uniform float uLayerWidth;
 uniform float uLayerMargin;
-// Overlay regions (left, top, right, bottom in overlay pixels) drawn moved right by uRegionShifts pixels
-#define MAX_REGIONS 48
+// Overlay regions (left, top, right, bottom in overlay pixels) drawn moved right by uRegionShifts pixels. Regions
+// with no shift stay where they are and come first (messages drawn over the moved elements' places)
+#define MAX_REGIONS 64
 uniform int uRegionCount;
 uniform vec4 uRegions[MAX_REGIONS];
 uniform float uRegionShifts[MAX_REGIONS];
@@ -42,52 +43,87 @@ bool inRect(vec2 p, vec4 r)
     return p.x >= r.x && p.x < r.z && p.y >= r.y && p.y < r.w;
 }
 
+// One texel limited to [lo, hi]; with skip_moved, the texels of moved regions (at their old places) are
+// transparent, so the overlay around them doesn't blend in their edges
+vec4 regionTexel(ivec2 t, ivec2 lo, ivec2 hi, ivec2 size, bool skip_moved)
+{
+    t = clamp(t, lo, hi);
+    if (skip_moved) {
+        vec2 c = vec2(t) + 0.5;
+        for (int i = 0; i < uRegionCount; i++) {
+            if (uRegionShifts[i] != 0.0 && inRect(c, uRegions[i])) {
+                return vec4(0.0);
+            }
+        }
+    }
+    return fetchTexel(t, size);
+}
+
+// The overlay at q (premultiplied, alpha 0 where transparent), its texels limited to [lo, hi]
+vec4 sampleOverlay(vec2 q, vec2 band, ivec2 lo, ivec2 hi, ivec2 size, bool skip_moved)
+{
+    if (uSharp == 1) {
+        vec2 seam = floor(q + 0.5);
+        vec2 snapped = seam + clamp((q - seam) / band, -0.5, 0.5) - 0.5;
+        ivec2 base = ivec2(floor(snapped));
+        vec2 f = snapped - floor(snapped);
+        return mix(mix(regionTexel(base, lo, hi, size, skip_moved), regionTexel(base + ivec2(1, 0), lo, hi, size, skip_moved), f.x),
+                   mix(regionTexel(base + ivec2(0, 1), lo, hi, size, skip_moved), regionTexel(base + ivec2(1, 1), lo, hi, size, skip_moved), f.x), f.y);
+    }
+    return regionTexel(ivec2(floor(q)), lo, hi, size, skip_moved);
+}
+
 void main()
 {
     vec2 st = vec2(uv.x, abs(uFlipVertically - uv.y));
     ivec2 size = textureSize(uSampler, 0);
 
     if (uRegionCount > 0) {
-        // Find which overlay pixel this is: one of the moved regions, or the overlay where nothing moved away
+        // Which overlay pixel this is: a message staying put (when it has something here), a moved element,
+        // or the overlay where nothing moved away
         vec2 p = vec2(st.x * uLayerWidth - uLayerMargin, st.y * float(size.y));
         vec2 band = max(fwidth(p), vec2(1e-5));
-        vec2 q = p;
-        bool found = false;
+        ivec2 whole_hi = size - 1;
         for (int i = 0; i < uRegionCount; i++) {
-            vec2 moved = p - vec2(uRegionShifts[i], 0.0);
-            if (inRect(moved, uRegions[i])) {
-                q = moved;
-                found = true;
+            if (uRegionShifts[i] == 0.0 && inRect(p, uRegions[i])) {
+                vec4 c = sampleOverlay(p, band, ivec2(0), whole_hi, size, false);
+                if (c.a > 0.0) {
+                    mainColour = c;
+                    return;
+                }
                 break;
             }
         }
-        if (!found) {
-            if (p.x < 0.0 || p.x >= float(size.x)) {
-                discard;
+        for (int i = 0; i < uRegionCount; i++) {
+            vec2 moved = p - vec2(uRegionShifts[i], 0.0);
+            if (uRegionShifts[i] != 0.0 && inRect(moved, uRegions[i])) {
+                // (only its own texels: blending with the row below its edge drew a line)
+                vec4 c = sampleOverlay(moved, band, ivec2(uRegions[i].xy), ivec2(uRegions[i].zw) - 1, size, false);
+                if (c.a <= 0.0) {
+                    discard;
+                }
+                mainColour = c;
+                return;
             }
-            for (int i = 0; i < uRegionCount; i++) {
+        }
+        if (p.x < 0.0 || p.x >= float(size.x)) {
+            discard;
+        }
+        bool near_moved = false;
+        for (int i = 0; i < uRegionCount; i++) {
+            if (uRegionShifts[i] != 0.0) {
                 if (inRect(p, uRegions[i])) {
                     discard;
                 }
+                // (just outside one: leave its texels out of the blend)
+                near_moved = near_moved || inRect(p, uRegions[i] + vec4(-1.5, -1.5, 1.5, 1.5));
             }
         }
-        if (uSharp == 1) {
-            vec2 seam = floor(q + 0.5);
-            vec2 snapped = seam + clamp((q - seam) / band, -0.5, 0.5) - 0.5;
-            ivec2 base = ivec2(floor(snapped));
-            vec2 f = snapped - floor(snapped);
-            vec4 c = mix(mix(fetchTexel(base, size), fetchTexel(base + ivec2(1, 0), size), f.x),
-                         mix(fetchTexel(base + ivec2(0, 1), size), fetchTexel(base + ivec2(1, 1), size), f.x), f.y);
-            if (c.a <= 0.0) {
-                discard;
-            }
-            mainColour = c;
-            return;
-        }
-        mainColour = texelFetch(uSampler, clamp(ivec2(floor(q)), ivec2(0), size - 1), 0);
-        if (uDiscardPurplePixels == 1 && mainColour.rgb == vec3(1.0, 0.0, 1.0)) {
+        vec4 c = sampleOverlay(p, band, ivec2(0), whole_hi, size, near_moved);
+        if (c.a <= 0.0) {
             discard;
         }
+        mainColour = c;
         return;
     }
 
