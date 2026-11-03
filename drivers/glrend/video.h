@@ -18,6 +18,8 @@ typedef struct _VIDEO {
     GLint maxFragmentUniformBlocks;
     GLint maxSamples;
     GLfloat maxAnisotropy;
+    br_int_32 textureSharp; /* Sample unfiltered textures with anti-aliased texel edges */
+    br_int_32 textureUpscaler; /* 2x magnification of paletted textures: 0 = none, 1 = MMPX, 2 = xBR */
 
     struct {
         GLuint program;
@@ -42,6 +44,8 @@ typedef struct _VIDEO {
 
         struct {
             GLint main_texture; /* sampler2D */
+            GLint alpha_to_coverage; /* bool */
+            GLint sharp_filter;      /* bool */
         } uniforms;
 
         GLuint uboScene;
@@ -54,6 +58,8 @@ typedef struct _VIDEO {
 
         GLint mainTextureBinding;
     } brenderProgram;
+
+    GLint sampleBuffers; /* Non-zero if the default framebuffer is multisampled */
 } VIDEO, *HVIDEO;
 
 #pragma pack(push, 16)

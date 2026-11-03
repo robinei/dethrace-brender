@@ -189,6 +189,9 @@ typedef struct state_primitive {
     /* Mipmap filtering. BRT_NONE or BRT_LINEAR */
     br_token mip_filter;
 
+    /* Mipmapping requested via BR_MATF_MAP_ANTIALIASING. BRT_NONE or BRT_LINEAR */
+    br_token mip_map;
+
     br_boolean fog_enabled;
     br_colour fog_colour;
     br_scalar fog_min;

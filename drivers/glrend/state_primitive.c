@@ -40,6 +40,7 @@ static br_tv_template_entry template_entries[] = {
     { BRT(INDEX_FOG_O), F(prim.index_fog), Q | S | A, BRTV_CONV_COPY, 0, 0 },
     { BRT(MAP_INTERPOLATION_T), F(prim.filter), Q | S | A, BRTV_CONV_COPY, 0, 0 },
     { BRT(MIP_INTERPOLATION_T), F(prim.mip_filter), Q | S | A, BRTV_CONV_COPY, 0, 0 },
+    { BRT(MAP_ANTIALIASING_T), F(prim.mip_map), Q | S | A, BRTV_CONV_COPY, 0, 0 },
     { BRT(FOG_B), F(prim.fog_enabled), Q | S | A, BRTV_CONV_COPY, 0, 0 },
     { BRT(FOG_RGB), F(prim.fog_colour), Q | S | A, BRTV_CONV_COPY, 0, 0 },
     { BRT(FOG_MIN_F), F(prim.fog_min), Q | S | A, BRTV_CONV_COPY, 0, 0 },
@@ -67,6 +68,7 @@ static const state_primitive default_state = {
     .bump = NULL,
     .filter = BRT_NONE,
     .mip_filter = BRT_NONE,
+    .mip_map = BRT_NONE,
     .alpha_val = 1,
 };
 

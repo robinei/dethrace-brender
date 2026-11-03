@@ -62,6 +62,7 @@ br_renderer* RendererGLAllocate(br_device* device, br_renderer_facility* facilit
 static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
     br_uint_16 base_y = 0;
     int x, y;
+    int vp_x, vp_y, vp_w, vp_h;
     float rx, ry;
     HVIDEO hVideo = &self->pixelmap->screen->asFront.video;
     br_device_pixelmap *colour_target = NULL, *depth_target = NULL;
@@ -109,11 +110,17 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
     }
 
     DevicePixelmapGLGetViewport(colour_target->screen, &x, &y, &rx, &ry);
-    glViewport(colour_target->pm_base_x * rx + x, base_y *ry + y, colour_target->pm_width * rx, colour_target->pm_height * ry);
+    vp_x = colour_target->pm_base_x * rx + x;
+    vp_y = base_y * ry + y;
+    vp_w = colour_target->pm_width * rx;
+    vp_h = colour_target->pm_height * ry;
+    DevicePixelmapGLAdjustRenderViewport(colour_target->screen, colour_target, &vp_x, &vp_y, &vp_w, &vp_h);
+    glViewport(vp_x, vp_y, vp_w, vp_h);
 
     /* Bind the model UBO here, it's faster than doing it for each model group */
     glBindBufferBase(GL_UNIFORM_BUFFER, hVideo->brenderProgram.blockBindingModel, hVideo->brenderProgram.uboModel);
     glUniform1i(hVideo->brenderProgram.uniforms.main_texture, hVideo->brenderProgram.mainTextureBinding);
+    glUniform1i(hVideo->brenderProgram.uniforms.alpha_to_coverage, hVideo->sampleBuffers != 0);
 
     if (self->pixelmap->msaa_samples)
         glEnable(GL_MULTISAMPLE);
@@ -128,6 +135,7 @@ void BR_CMETHOD_DECL(br_renderer_gl, sceneEnd)(br_renderer* self) {
     glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
+    glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
 
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindBuffer(GL_UNIFORM_BUFFER, 0);

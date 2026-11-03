@@ -88,6 +88,8 @@ in vec3 v_frag_pos;
 out vec4 fragColour;
 
 uniform sampler2D main_texture;
+uniform bool alpha_to_coverage;
+uniform bool sharp_filter;
 
 vec3 adjustBrightness(in vec3 colour, in float brightness)
 {
@@ -199,6 +201,7 @@ void doDistanceFog() {
 
 void main() {
     vec4 textureColour;
+    float coverage = 1.0;
 
     processClipPlanes();
 
@@ -207,10 +210,37 @@ void main() {
     if (disable_texture) {
         textureColour = surface_colour;
     } else {
-        textureColour = texture(main_texture, mappedUV);
-        // full black pixel is transparent
-        if(!disable_colour_key && textureColour.rgb == vec3(0)) {
-            discard;
+        if (sharp_filter) {
+            // Anti-aliased nearest: flat texels, with a bilinear blend only in a ~1 screen pixel band
+            // around texel borders. When minified the band covers the whole texel (plain trilinear).
+            // textureGrad keeps the mip level and anisotropy based on the unsnapped coordinates.
+            vec2 size = vec2(textureSize(main_texture, 0));
+            vec2 texel = mappedUV * size;
+            vec2 seam = floor(texel + 0.5);
+            vec2 band = max(fwidth(texel), vec2(1e-5));
+            vec2 snapped = (seam + clamp((texel - seam) / band, -0.5, 0.5)) / size;
+            textureColour = textureGrad(main_texture, snapped, dFdx(mappedUV), dFdy(mappedUV));
+        } else {
+            textureColour = texture(main_texture, mappedUV);
+        }
+        // full black pixel is transparent. Paletted textures also store the key as
+        // alpha == 0, so filtered/mipmapped texels carry partial coverage: discard below
+        // half coverage and un-premultiply the rest to avoid dark fringes.
+        if(!disable_colour_key) {
+            if (textureColour.a <= 0.0 || textureColour.rgb == vec3(0)) {
+                discard;
+            }
+            if (alpha_to_coverage) {
+                // Multisampled: turn alpha into sample coverage, sharpened to a ~1 pixel wide
+                // edge so the cut-out stays crisp while thin distant details fade smoothly.
+                coverage = clamp((textureColour.a - 0.5) / max(fwidth(textureColour.a), 0.0001) + 0.5, 0.0, 1.0);
+                if (coverage <= 0.0) {
+                    discard;
+                }
+            } else if (textureColour.a < 0.5) {
+                discard;
+            }
+            textureColour.rgb /= textureColour.a;
         }
     }
 
@@ -238,7 +268,7 @@ void main() {
 #endif
 
     // Apply alpha transparency
-    fragColour.a = alpha;
+    fragColour.a = alpha * coverage;
 
     // Apply lighting
     if (lighting == 1u && prelit == 0u) {

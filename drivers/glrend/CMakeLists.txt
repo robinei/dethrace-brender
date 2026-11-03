@@ -58,6 +58,8 @@ set(RENDERER_FILES
         gstored.c
         gstored.h
         v1model.c
+        mmpx.c
+        xbr.c
 
         onscreen.c
 

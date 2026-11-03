@@ -195,6 +195,8 @@ br_device_pixelmap* DevicePixelmapGLAllocateFront(br_device* dev, br_output_faci
      * Make a copy, so they can't switch things out from under us.
      */
     self->asFront.callbacks = *pt.callbacks;
+    self->asFront.video.textureSharp = pt.callbacks->texture_sharp;
+    self->asFront.video.textureUpscaler = pt.callbacks->texture_upscaler;
 
     if (gladLoadGLLoader(DevicePixelmapGLGetGetProcAddress(self)) == 0) {
         BR_ERROR("GLREND: Unable to load OpenGL functions.");

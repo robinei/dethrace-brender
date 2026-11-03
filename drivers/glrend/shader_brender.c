@@ -24,6 +24,8 @@ static void VIDEOI_GetShaderVariables(HVIDEO hVideo) {
     hVideo->brenderProgram.attributes.aNormal = glGetAttribLocation(hVideo->brenderProgram.program, "aNormal");
     hVideo->brenderProgram.attributes.aColour = glGetAttribLocation(hVideo->brenderProgram.program, "aColour");
     hVideo->brenderProgram.uniforms.main_texture = glGetUniformLocation(hVideo->brenderProgram.program, "main_texture");
+    hVideo->brenderProgram.uniforms.sharp_filter = glGetUniformLocation(hVideo->brenderProgram.program, "sharp_filter");
+    hVideo->brenderProgram.uniforms.alpha_to_coverage = glGetUniformLocation(hVideo->brenderProgram.program, "alpha_to_coverage");
     GL_CHECK_ERROR();
 }
 

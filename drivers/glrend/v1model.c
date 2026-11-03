@@ -3,6 +3,8 @@
  */
 #include "brassert.h"
 #include "drv.h"
+#include "mmpx.h"
+#include "xbr.h"
 #include <string.h>
 
 static void apply_blend_mode(state_stack* self) {
@@ -110,19 +112,37 @@ static void apply_depth_properties(state_stack* state, uint32_t states) {
 }
 
 // take a pixelmap and palette and convert 8 bit to 32 bit just in time
-static void update_paletted_texture(br_pixelmap *src, br_uint_32 *palette) {
-    uint32_t* buffer = BrScratchAllocate(sizeof(uint32_t) * src->width * src->height);
+static void update_paletted_texture(HVIDEO hVideo, br_pixelmap *src, br_uint_32 *palette) {
+    int width = src->width, height = src->height;
+    uint32_t* buffer = BrScratchAllocate(sizeof(uint32_t) * width * height);
     uint32_t* buffer_ptr = buffer;
     br_uint_8* src_px = src->pixels;
 
-    for (int y = 0; y < src->height; y++) {
-        for (int x = 0; x < src->width; x++) {
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
             int index = src_px[y * src->row_bytes + x];
-            *buffer_ptr = (0xff000000 | BR_BLU(palette[index]) << 16 | BR_GRN(palette[index]) << 8 | BR_RED(palette[index]));
+            uint32_t rgb = BR_BLU(palette[index]) << 16 | BR_GRN(palette[index]) << 8 | BR_RED(palette[index]);
+            // Black is the colour key. Store it as zero alpha too, so mipmap levels carry
+            // coverage and the texture is effectively premultiplied (see brender.frag.glsl).
+            *buffer_ptr = rgb == 0 ? 0 : (0xff000000 | rgb);
             buffer_ptr++;
         }
     }
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, src->width, src->height, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
+
+    if (hVideo->textureUpscaler == 1 || hVideo->textureUpscaler == 2) {
+        // Magnify 2x with MMPX (smoother diagonals and curves using only the texture's own colours)
+        // or xBR (smoother, blended edges).
+        uint32_t* upscaled = BrMemAllocate(sizeof(uint32_t) * width * height * 4, BR_MEMORY_DRIVER);
+        if (hVideo->textureUpscaler == 2) {
+            XBRScale2x(buffer, upscaled, width, height);
+        } else {
+            MMPXScale2x(buffer, upscaled, width, height);
+        }
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width * 2, height * 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, upscaled);
+        BrMemFree(upscaled);
+    } else {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
+    }
     glGenerateMipmap(GL_TEXTURE_2D);
     BrScratchFree(buffer);
     GL_CHECK_ERROR();
@@ -219,13 +239,13 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
 
             // has the 8 bit color source changed?
             if (state->prim.colour_map->paletted_source_dirty == BR_TRUE) {
-                update_paletted_texture(state->prim.colour_map->source, state->prim.colour_map->palette_pointer->entries);
+                update_paletted_texture(hVideo, state->prim.colour_map->source, state->prim.colour_map->palette_pointer->entries);
                 state->prim.colour_map->paletted_source_dirty = BR_FALSE;
                 state->prim.colour_map->palette_revision = state->prim.colour_map->palette_pointer->revision;
             }
             // or has the palette changed?
             else if (state->prim.colour_map->palette_pointer != NULL && state->prim.colour_map->palette_revision != state->prim.colour_map->palette_pointer->revision) {
-                update_paletted_texture(state->prim.colour_map->source, state->prim.colour_map->palette_pointer->entries);
+                update_paletted_texture(hVideo, state->prim.colour_map->source, state->prim.colour_map->palette_pointer->entries);
                 state->prim.colour_map->palette_revision = state->prim.colour_map->palette_pointer->revision;
             }
 
@@ -245,25 +265,30 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
 
         GLenum minFilter, magFilter;
         GLfloat maxAnisotropy;
-        if (state->prim.filter == BRT_LINEAR && state->prim.mip_filter == BRT_LINEAR) {
-            minFilter = GL_LINEAR_MIPMAP_LINEAR;
-            magFilter = GL_LINEAR;
-            maxAnisotropy = hVideo->maxAnisotropy;
-        } else if (state->prim.filter == BRT_LINEAR && state->prim.mip_filter == BRT_NONE) {
-            minFilter = GL_LINEAR;
-            magFilter = GL_LINEAR;
-            maxAnisotropy = 1.0f;
-        } else if (state->prim.filter == BRT_NONE && state->prim.mip_filter == BRT_LINEAR) {
-            minFilter = GL_NEAREST_MIPMAP_NEAREST;
-            magFilter = GL_NEAREST;
-            maxAnisotropy = hVideo->maxAnisotropy;
-        } else if (state->prim.filter == BRT_NONE && state->prim.mip_filter == BRT_NONE) {
-            minFilter = GL_NEAREST;
-            magFilter = GL_NEAREST;
-            maxAnisotropy = 1.0f;
-        } else {
-            assert(0);
+        br_token filter = state->prim.filter;
+        /*
+         * Sharp sampling: unfiltered textures are sampled with hardware bilinear, but the shader
+         * snaps the UV to texel centres except for a ~1 pixel band at texel borders.
+         */
+        br_boolean sharp = hVideo->textureSharp && filter != BRT_LINEAR && state->prim.colour_map != NULL;
+        if (sharp) {
+            filter = BRT_LINEAR;
         }
+        glUniform1i(hVideo->brenderProgram.uniforms.sharp_filter, sharp);
+        /*
+         * Materials request mipmapping through BR_MATF_MAP_ANTIALIASING (mip_map), while
+         * BR_MATF_MIP_INTERPOLATION (mip_filter) asks for blending between levels. Treat
+         * either as "use mipmaps", and always blend between levels (trilinear) - the
+         * magnification filter still decides between crisp and smooth texels.
+         */
+        if (state->prim.mip_map == BRT_LINEAR || state->prim.mip_filter == BRT_LINEAR) {
+            minFilter = filter == BRT_LINEAR ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST_MIPMAP_LINEAR;
+            maxAnisotropy = hVideo->maxAnisotropy;
+        } else {
+            minFilter = filter == BRT_LINEAR ? GL_LINEAR : GL_NEAREST;
+            maxAnisotropy = 1.0f;
+        }
+        magFilter = filter == BRT_LINEAR ? GL_LINEAR : GL_NEAREST;
 
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (GLint)minFilter);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (GLint)magFilter);
@@ -276,8 +301,14 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
             glEnable(GL_BLEND);
             model->alpha = state->prim.alpha_val / 255.0f;
             apply_blend_mode(state);
+            glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
         } else {
             glDisable(GL_BLEND);
+            /* Opaque: output alpha is only used as colour-key coverage (see brender.frag.glsl) */
+            model->alpha = 1.0f;
+            if (hVideo->sampleBuffers) {
+                glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+            }
         }
 
         model->fog_enabled = state->prim.fog_enabled;
