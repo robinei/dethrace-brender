@@ -158,6 +158,7 @@ float blobShadow(vec3 p, vec3 n) {
 // surface_up.w) to break up tiled textures
 uniform vec4 surface_sun;
 uniform vec4 surface_up;  // the world's up in view space
+uniform vec4 surface_haze[2]; // haze colour, most of it; the distance most of it is reached by
 
 float hash3(vec3 p) {
     p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
@@ -464,6 +465,12 @@ void main() {
     // Apply lighting
     if (lighting == 1u && prelit == 0u) {
         fragColour.rgb *= vec3(ka, ka, ka);
+    }
+
+    if (surface_haze[0].w > 0.0) {
+        // aerial perspective: everything takes on a little of the haze (sky) colour with distance, sharp
+        float d = length(position.xyz);
+        fragColour.rgb = mix(fragColour.rgb, surface_haze[0].rgb, surface_haze[0].w * (1.0 - exp(-2.0 * d / max(surface_haze[1].x, 1.0))));
     }
 
     float fog = doDistanceFog();

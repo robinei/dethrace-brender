@@ -35,6 +35,7 @@ static void VIDEOI_GetShaderVariables(HVIDEO hVideo) {
     hVideo->brenderProgram.uniforms.spots = glGetUniformLocation(hVideo->brenderProgram.program, "spots");
     hVideo->brenderProgram.uniforms.surface_sun = glGetUniformLocation(hVideo->brenderProgram.program, "surface_sun");
     hVideo->brenderProgram.uniforms.surface_up = glGetUniformLocation(hVideo->brenderProgram.program, "surface_up");
+    hVideo->brenderProgram.uniforms.surface_haze = glGetUniformLocation(hVideo->brenderProgram.program, "surface_haze");
     GL_CHECK_ERROR();
 }
 

@@ -50,10 +50,13 @@ typedef float BR_CALLBACK br_device_gl_textureglow_cbfn(const char *identifier, 
 // Optional. Queried when drawing with a glowing texture: scales its glow, by the `id` texture_glow gave it
 // (eg. brighter brake lights while braking)
 typedef float BR_CALLBACK br_device_gl_glowscale_cbfn(int id);
-// Optional. Queried at the start of each scene, for the textured surfaces with normals: sets 8 floats,
+// Optional. Queried at the start of each scene, for the textured surfaces with normals: sets 16 floats,
 // the sun's direction (towards it) in view space and how much surfaces facing away from it darken (0 = none),
 // then the world's up in view space and how much a large scale brightness variation breaks up the tiled
-// textures (0 = none). Returns non-zero to use them. Also queried for each draw, so it can change within a scene
+// textures (0 = none); then a haze colour (rgb) and how much (at most) of it everything takes on with distance,
+// and the distance by which most of that is reached (aerial perspective). Returns non-zero to use them. Also
+// queried for each draw, so it can change within a scene
+#define BR_GL_SCENE_SURFACE_FLOATS 16
 typedef int BR_CALLBACK br_device_gl_scenesurface_cbfn(float *params);
 // Optional. Queried for each draw: zero to leave the depth buffer alone (eg. for the sky, so the effects
 // reading depth take it for infinitely far)

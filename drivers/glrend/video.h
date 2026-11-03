@@ -27,7 +27,7 @@ typedef struct _VIDEO {
     br_device_gl_scenelighting_cbfn* sceneLighting;
     br_device_gl_scenesurface_cbfn* sceneSurface;
     br_device_gl_depthwrite_cbfn* depthWrite;
-    float sceneSurfaceUploaded[8]; /* the scene_surface parameters last given to the shader */
+    float sceneSurfaceUploaded[BR_GL_SCENE_SURFACE_FLOATS]; /* the scene_surface parameters last given to the shader */
 
     struct {
         GLuint program;
@@ -69,6 +69,7 @@ typedef struct _VIDEO {
             GLint spots;             /* vec4[3 * MAX] */
             GLint surface_sun;       /* vec4 */
             GLint surface_up;        /* vec4 */
+            GLint surface_haze;      /* vec4[2] */
         } uniforms;
 
         GLuint uboScene;
