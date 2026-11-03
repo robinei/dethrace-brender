@@ -133,7 +133,7 @@ vec2 shimmer(vec2 p) {
         if (plume <= 0.0) {
             continue;
         }
-        float amp = 2.5 * uScale * uShimmers[i].w * plume;
+        float amp = 0.65 * uScale * uShimmers[i].w * plume;
         offset += amp * vec2(sin(p.y * 0.09 / uScale - uTime * 9.0 + float(i)), 0.5 * cos(p.x * 0.07 / uScale + uTime * 7.0));
     }
     return offset;
