@@ -85,8 +85,14 @@ typedef struct _VIDEO {
         int width, height, samples;
         GLuint msaaFbo, msaaColour, msaaGlow, msaaDepth; /* multisampled target, when samples > 0 */
         GLuint resolveFbo, colourTex, glowTex, depthTex;
-        GLuint program;
-        GLint uColour, uGlow, uDepth, uNear, uFar, uStart, uEnd, uMaxRadius, uGlowStrength;
+        GLuint aoFbo, aoTex; /* ambient occlusion, half resolution */
+        GLuint program, aoProgram;
+        GLint uniforms[32], aoUniforms[8];
+        /* the view: the largest perspective scene drawn while active */
+        int viewArea;
+        float view[4]; /* x, y, width, height in window pixels */
+        float proj[2]; /* projection x and y scale */
+        float nearZ, farZ;
     } post;
 } VIDEO, *HVIDEO;
 

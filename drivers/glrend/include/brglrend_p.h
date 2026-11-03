@@ -21,6 +21,15 @@ typedef struct br_gl_post_params {
     float dof_start, dof_end;   /* depth of field: distances where the blur starts and is at its strongest */
     float dof_max_radius;       /* strongest blur radius, in window pixels; 0 disables depth of field */
     float glow_strength;        /* bloom around light sources (see texture_glow), if Begin was asked for it */
+    float flare_strength;       /* light streaks and lens ghost from the glow */
+    float ao_strength;          /* ambient occlusion, 0 disables */
+    float ao_radius;            /* in view units */
+    float speed;                /* speed blur, 0..1 */
+    float grade;                /* colour grading strength, 0 disables */
+    float night;                /* 1 at night (cooler grading) */
+    float time;                 /* seconds, for animated effects */
+    int shimmer_count;          /* heat shimmer above these points: view space position and strength, up to 8 */
+    float shimmers[4 * 8];
 } br_gl_post_params;
 
 br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap *screen, br_boolean glow);

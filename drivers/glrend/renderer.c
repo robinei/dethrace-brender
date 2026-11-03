@@ -116,6 +116,8 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
     vp_h = colour_target->pm_height * ry;
     DevicePixelmapGLAdjustRenderViewport(colour_target->screen, colour_target, &vp_x, &vp_y, &vp_w, &vp_h);
     glViewport(vp_x, vp_y, vp_w, vp_h);
+    PostProcessRecordScene(hVideo, vp_x, vp_y, vp_w, vp_h, &self->state.current->matrix.view_to_screen,
+        self->state.current->matrix.view_to_screen_hint, self->state.current->matrix.hither_z, self->state.current->matrix.yon_z);
 
     /* Bind the model UBO here, it's faster than doing it for each model group */
     glBindBufferBase(GL_UNIFORM_BUFFER, hVideo->brenderProgram.blockBindingModel, hVideo->brenderProgram.uboModel);

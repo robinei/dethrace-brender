@@ -19,6 +19,10 @@ void VIDEO_Close(HVIDEO hVideo);
 
 GLuint VIDEOI_CreateAndCompileShader(const char* name, GLenum type, const char* shader, size_t size);
 
+/* post.c */
+void PostProcessRecordScene(HVIDEO hVideo, int x, int y, int w, int h, const br_matrix4* view_to_screen, br_token hint,
+    br_scalar hither, br_scalar yon);
+
 GLuint VIDEOI_LoadAndCompileShader(GLenum type, const char* path, const char* default_data, size_t default_size);
 
 GLuint VIDEOI_CreateAndCompileProgram(GLuint vert, GLuint frag);

@@ -21,6 +21,21 @@ add_custom_command(
         COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DFILE=brender.frag.glsl" -P "${BRender_SOURCE_DIR}/cmake/EmbedResource.cmake"
         DEPENDS brender.frag.glsl
 )
+add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/post.vert.glsl.h"
+        COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DFILE=post.vert.glsl" -P "${BRender_SOURCE_DIR}/cmake/EmbedResource.cmake"
+        DEPENDS post.vert.glsl
+)
+add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/post.frag.glsl.h"
+        COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DFILE=post.frag.glsl" -P "${BRender_SOURCE_DIR}/cmake/EmbedResource.cmake"
+        DEPENDS post.frag.glsl
+)
+add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ssao.frag.glsl.h"
+        COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DFILE=ssao.frag.glsl" -P "${BRender_SOURCE_DIR}/cmake/EmbedResource.cmake"
+        DEPENDS ssao.frag.glsl
+)
 
 
 set(GLSTATE_FILES
@@ -147,6 +162,9 @@ add_library(glrend
         "${CMAKE_CURRENT_BINARY_DIR}/default.frag.glsl.h"
         "${CMAKE_CURRENT_BINARY_DIR}/brender.vert.glsl.h"
         "${CMAKE_CURRENT_BINARY_DIR}/brender.frag.glsl.h"
+        "${CMAKE_CURRENT_BINARY_DIR}/post.vert.glsl.h"
+        "${CMAKE_CURRENT_BINARY_DIR}/post.frag.glsl.h"
+        "${CMAKE_CURRENT_BINARY_DIR}/ssao.frag.glsl.h"
         )
 
 get_target_property(target_type glrend TYPE)
