@@ -138,7 +138,14 @@ void RenderFullScreenTextureToFrameBuffer(br_device_pixelmap* self, GLuint textu
     glUseProgram(self->asFront.video.defaultProgram.program);
     glUniform1f(self->asFront.video.defaultProgram.uFlipVertically, (float)flipVertically);
     glUniform1i(self->asFront.video.defaultProgram.uDiscardPurplePixels, discardPurplePixels);
+    glUniform1i(self->asFront.video.defaultProgram.uSharp, self->asFront.video.textureSharp != 0);
+    if (self->asFront.video.textureSharp && discardPurplePixels) {
+        // sharp sampling outputs premultiplied colour with partial coverage at cut-out edges
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    }
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+    glDisable(GL_BLEND);
 
     glBindVertexArray(0);
     glEnable(GL_DEPTH_TEST);

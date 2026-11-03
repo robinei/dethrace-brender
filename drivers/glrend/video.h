@@ -30,6 +30,7 @@ typedef struct _VIDEO {
         GLint uMVP;          /* Model-View-Projection Matrix, mat4 */
         GLint uFlipVertically;
         GLint uDiscardPurplePixels;
+        GLint uSharp;
     } defaultProgram;
 
     struct {
