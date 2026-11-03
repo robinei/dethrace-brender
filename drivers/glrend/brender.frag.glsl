@@ -126,10 +126,13 @@ vec3 spotLighting(vec3 p, vec3 n) {
 }
 
 // Blob shadows (entries with a negative range: the radius; direction: the world's up; strength): darken the
-// surfaces facing up within the radius around the point, near its height (the ground under a pedestrian)
+// surfaces facing up within the radius around the point, from a little above it to a radius below (the ground
+// under a pedestrian). Not the sprites themselves (no normal)
 float blobShadow(vec3 p, vec3 n) {
     float shade = 1.0;
-    bool has_normal = dot(n, n) > 0.01;
+    if (!(dot(n, n) > 0.01)) {
+        return 1.0;
+    }
     for (int i = 0; i < num_spots; i++) {
         float radius = -spots[3 * i].w;
         if (radius <= 0.0) {
@@ -139,12 +142,12 @@ float blobShadow(vec3 p, vec3 n) {
         vec3 v = p - spots[3 * i].xyz;
         float h = dot(v, up);
         float r = length(v - up * h) / radius;
-        if (r >= 1.0 || abs(h) >= 0.5 * radius) {
+        if (r >= 1.0 || h >= 0.3 * radius || h <= -1.2 * radius) {
             continue;
         }
-        float facing = has_normal ? smoothstep(0.4, 0.8, abs(dot(n, up))) : 1.0;
+        float facing = smoothstep(0.4, 0.8, abs(dot(n, up)));
         float disc = 1.0 - smoothstep(0.3, 1.0, r);
-        float near = 1.0 - smoothstep(0.15 * radius, 0.5 * radius, abs(h));
+        float near = h > 0.0 ? 1.0 - smoothstep(0.1 * radius, 0.3 * radius, h) : 1.0 - smoothstep(0.6 * radius, 1.2 * radius, -h);
         shade *= 1.0 - spots[3 * i + 1].w * disc * near * facing;
     }
     return shade;
