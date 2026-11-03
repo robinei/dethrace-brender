@@ -175,10 +175,17 @@ float valueNoise(vec3 x) {
                    mix(hash3(i + vec3(0.0, 1.0, 1.0)), hash3(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);
 }
 
-vec3 surfaceShading(vec3 model_pos, vec3 p, vec3 n) {
+vec3 surfaceShading(vec3 model_pos, vec3 p) {
     vec3 shade = vec3(1.0);
-    if (surface_sun.w > 0.0 && dot(n, n) > 0.01) {
-        // relative to the ground, which keeps its brightness: walls turned away from the sun darken
+    if (surface_sun.w > 0.0) {
+        // relative to the ground, which keeps its brightness: walls turned away from the sun darken. The face's
+        // own (flat) normal, of the side seen: the vertex normals are averaged over neighbouring faces (tilted
+        // where the road meets kerbs and walls, and turning which side they face with the view)
+        vec3 n = cross(dFdx(p), dFdy(p));
+        if (dot(n, n) < 1e-20) {
+            return shade;
+        }
+        n = normalize(n);
         if (dot(n, -p) < 0.0) {
             n = -n;
         }
@@ -403,7 +410,7 @@ void main() {
     // (the track materials are lit or not as their files say, so this goes by whether there is a normal:
     // not for the sprites)
     if ((surface_sun.w > 0.0 || surface_up.w > 0.0) && !disable_texture && dot(normal.xyz, normal.xyz) > 0.01) {
-        fragColour.rgb *= surfaceShading(rawPosition, position.xyz, normalize(normal.xyz));
+        fragColour.rgb *= surfaceShading(rawPosition, position.xyz);
     }
 
     float glowMask = 0.0;
