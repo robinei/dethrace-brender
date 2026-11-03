@@ -125,6 +125,31 @@ vec3 spotLighting(vec3 p, vec3 n) {
     return sum;
 }
 
+// Blob shadows (entries with a negative range: the radius; direction: the world's up; strength): darken the
+// surfaces facing up within the radius around the point, near its height (the ground under a pedestrian)
+float blobShadow(vec3 p, vec3 n) {
+    float shade = 1.0;
+    bool has_normal = dot(n, n) > 0.01;
+    for (int i = 0; i < num_spots; i++) {
+        float radius = -spots[3 * i].w;
+        if (radius <= 0.0) {
+            continue;
+        }
+        vec3 up = spots[3 * i + 1].xyz;
+        vec3 v = p - spots[3 * i].xyz;
+        float h = dot(v, up);
+        float r = length(v - up * h) / radius;
+        if (r >= 1.0 || abs(h) >= 0.5 * radius) {
+            continue;
+        }
+        float facing = has_normal ? smoothstep(0.4, 0.8, abs(dot(n, up))) : 1.0;
+        float disc = 1.0 - smoothstep(0.3, 1.0, r);
+        float near = 1.0 - smoothstep(0.15 * radius, 0.5 * radius, abs(h));
+        shade *= 1.0 - spots[3 * i + 1].w * disc * near * facing;
+    }
+    return shade;
+}
+
 // Light scattered towards the eye by the air between it and p: for each light, the integral of 1/distance^2
 // along the view ray, weighted by the cone at the ray's closest point to the light
 vec3 spotHaze(vec3 p) {
@@ -343,6 +368,9 @@ void main() {
         // lit up to the normal (daylight) brightness, not beyond, so close bright surfaces don't blow out
         vec3 lit = fragColour.rgb * min(scene_brightness + spotLight, vec3(1.0));
         fragColour.rgb = mix(lit, textureColour.rgb, clamp(glowMask, 0.0, 1.0) * (1.0 - scene_brightness));
+        if (num_spots > 0) {
+            fragColour.rgb *= blobShadow(position.xyz, normalize(normal.xyz));
+        }
     }
 
     /* Perform gamma correction */
