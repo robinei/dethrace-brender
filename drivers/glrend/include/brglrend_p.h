@@ -34,6 +34,9 @@ typedef struct br_gl_post_params {
 
 br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap *screen, br_boolean glow);
 void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap *screen, const br_gl_post_params *params);
+/* While post-processing: stop (or resume) the drawing writing depth, for translucent things (smoke) drawn
+ * after the rest, so the effects see the surfaces behind them instead */
+void BR_PUBLIC_ENTRY BrGLPostProcessDepthWrite(br_pixelmap *screen, br_boolean enabled);
 
 #endif /* _NO_PROTOTYPES */
 

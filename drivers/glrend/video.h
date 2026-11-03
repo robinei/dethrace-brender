@@ -93,6 +93,7 @@ typedef struct _VIDEO {
         float view[4]; /* x, y, width, height in window pixels */
         float proj[2]; /* projection x and y scale */
         float nearZ, farZ;
+        int noDepthWrite; /* draws leave the depth alone (see BrGLPostProcessDepthWrite) */
     } post;
 } VIDEO, *HVIDEO;
 

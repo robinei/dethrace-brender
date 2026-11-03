@@ -236,6 +236,7 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
         return;
     }
     hVideo->post.active = 0;
+    hVideo->post.noDepthWrite = 0;
     w = hVideo->post.width;
     h = hVideo->post.height;
     u = hVideo->post.uniforms;
@@ -364,6 +365,14 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
 }
 
 /* Called by sceneBegin while post-processing: the largest perspective scene is the view */
+void BR_PUBLIC_ENTRY BrGLPostProcessDepthWrite(br_pixelmap* screen, br_boolean enabled) {
+    br_device_pixelmap* self = (br_device_pixelmap*)screen;
+
+    if (self != NULL && self->screen == self) {
+        self->asFront.video.post.noDepthWrite = self->asFront.video.post.active && !enabled;
+    }
+}
+
 void PostProcessRecordScene(HVIDEO hVideo, int x, int y, int w, int h, const br_matrix4* view_to_screen, br_token hint,
     br_scalar hither, br_scalar yon) {
     if (!hVideo->post.active || hint != BRT_PERSPECTIVE || w * h <= hVideo->post.viewArea) {
