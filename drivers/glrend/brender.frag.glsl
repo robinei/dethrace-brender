@@ -89,6 +89,10 @@ out vec4 fragColour;
 
 uniform sampler2D main_texture;
 uniform bool alpha_to_coverage;
+// Fog by distance from the eye, from fog_min to fully fogged at fog_max
+uniform bool fog_distance;
+// Above 0: fade out (alpha) from this fraction of yon_z to yon_z, by distance from the eye
+uniform float distance_fade;
 uniform bool sharp_filter;
 
 vec3 adjustBrightness(in vec3 colour, in float brightness)
@@ -183,6 +187,16 @@ void processClipPlanes() {
 }
 
 void doDistanceFog() {
+    if (fog_enabled && fog_distance) {
+        // distance rather than depth: the fog does not change as the view turns, and fully fogs geometry
+        // before the yon plane clips it, also at the sides of a wide view
+        float d = length(position.xyz);
+        float t = clamp((d - fog_min) / max(fog_max - fog_min, 0.0001), 0.0, 1.0);
+        // dense early like the original (about half at a quarter of the way), then easing into full fog
+        float f = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
+        fragColour.rgb = mix(fragColour.rgb, fog_colour, f);
+        return;
+    }
     if (fog_enabled) {
 
         // Compute exponential fog factor
@@ -276,4 +290,9 @@ void main() {
     }
 
     doDistanceFog();
+
+    if (distance_fade > 0.0) {
+        float d = length(position.xyz);
+        fragColour.a *= 1.0 - smoothstep(distance_fade * yon_z, yon_z, d);
+    }
 }

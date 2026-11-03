@@ -20,6 +20,8 @@ typedef struct _VIDEO {
     GLfloat maxAnisotropy;
     br_int_32 textureSharp; /* Sample unfiltered textures with anti-aliased texel edges */
     br_int_32 textureUpscaler; /* 2x magnification of paletted textures: 0 = none, 1 = MMPX, 2 = xBR */
+    br_int_32 fogDistance;     /* Fog by distance, from fog_min to fully fogged at fog_max */
+    br_device_gl_distancefade_cbfn* distanceFade;
 
     struct {
         GLuint program;
@@ -52,6 +54,8 @@ typedef struct _VIDEO {
             GLint main_texture; /* sampler2D */
             GLint alpha_to_coverage; /* bool */
             GLint sharp_filter;      /* bool */
+            GLint fog_distance;      /* bool */
+            GLint distance_fade;     /* float */
         } uniforms;
 
         GLuint uboScene;

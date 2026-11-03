@@ -26,6 +26,8 @@ static void VIDEOI_GetShaderVariables(HVIDEO hVideo) {
     hVideo->brenderProgram.uniforms.main_texture = glGetUniformLocation(hVideo->brenderProgram.program, "main_texture");
     hVideo->brenderProgram.uniforms.sharp_filter = glGetUniformLocation(hVideo->brenderProgram.program, "sharp_filter");
     hVideo->brenderProgram.uniforms.alpha_to_coverage = glGetUniformLocation(hVideo->brenderProgram.program, "alpha_to_coverage");
+    hVideo->brenderProgram.uniforms.fog_distance = glGetUniformLocation(hVideo->brenderProgram.program, "fog_distance");
+    hVideo->brenderProgram.uniforms.distance_fade = glGetUniformLocation(hVideo->brenderProgram.program, "distance_fade");
     GL_CHECK_ERROR();
 }
 

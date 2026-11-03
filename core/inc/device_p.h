@@ -32,6 +32,9 @@ typedef void BR_CALLBACK br_device_gl_adjustrenderviewport_cbfn(br_pixelmap* tar
 // The moved areas are not drawn at their original position. Returns the region count.
 #define BR_GL_MAX_OVERLAY_REGIONS 48
 typedef int BR_CALLBACK br_device_gl_overlayregions_cbfn(const float **regions);
+// Optional. Queried for each draw: when above 0, geometry fades out (to whatever was drawn behind it, eg. the
+// sky) between this fraction of the yon distance and the yon distance itself
+typedef float BR_CALLBACK br_device_gl_distancefade_cbfn(void);
 
 typedef struct br_device_gl_callback_procs {
     br_device_gl_getprocaddress_cbfn      *get_proc_address;
@@ -42,6 +45,8 @@ typedef struct br_device_gl_callback_procs {
     br_int_32                              texture_sharp;   /* Non-zero: unfiltered textures get anti-aliased texel edges */
     br_int_32                              texture_upscaler; /* 2x magnification of paletted textures: 0 = none, 1 = MMPX, 2 = xBR */
     br_device_gl_overlayregions_cbfn       *overlay_regions;
+    br_device_gl_distancefade_cbfn         *distance_fade;
+    br_int_32                              fog_distance;    /* Non-zero: fog by distance, from fog_min to fully fogged at fog_max */
 } br_device_gl_callback_procs;
 
 #endif

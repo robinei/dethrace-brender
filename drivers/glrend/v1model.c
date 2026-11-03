@@ -265,6 +265,7 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
 
         GLenum minFilter, magFilter;
         GLfloat maxAnisotropy;
+        GLfloat fade;
         br_token filter = state->prim.filter;
         /*
          * Sharp sampling: unfiltered textures are sampled with hardware bilinear, but the shader
@@ -297,10 +298,20 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
             glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, maxAnisotropy);
 
         blending_on = (state->prim.flags & PRIMF_BLEND) || (state->prim.colour_map != NULL && state->prim.colour_map->blended);
+        fade = hVideo->distanceFade != NULL ? hVideo->distanceFade() : 0.0f;
+        glUniform1f(hVideo->brenderProgram.uniforms.distance_fade, fade);
+        glUniform1i(hVideo->brenderProgram.uniforms.alpha_to_coverage, hVideo->sampleBuffers != 0 && (blending_on || fade <= 0.0f));
         if (blending_on) {
             glEnable(GL_BLEND);
             model->alpha = state->prim.alpha_val / 255.0f;
             apply_blend_mode(state);
+            glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+        } else if (fade > 0.0f) {
+            /* Opaque, fading out with distance: output alpha is the fade, so blend instead of using it as
+             * colour-key coverage (cut-outs are then discarded, per sample when supersampling) */
+            glEnable(GL_BLEND);
+            glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
+            model->alpha = 1.0f;
             glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
         } else {
             glDisable(GL_BLEND);

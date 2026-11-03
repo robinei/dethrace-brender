@@ -121,6 +121,7 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
     glBindBufferBase(GL_UNIFORM_BUFFER, hVideo->brenderProgram.blockBindingModel, hVideo->brenderProgram.uboModel);
     glUniform1i(hVideo->brenderProgram.uniforms.main_texture, hVideo->brenderProgram.mainTextureBinding);
     glUniform1i(hVideo->brenderProgram.uniforms.alpha_to_coverage, hVideo->sampleBuffers != 0);
+    glUniform1i(hVideo->brenderProgram.uniforms.fog_distance, hVideo->fogDistance != 0);
 
     if (self->pixelmap->msaa_samples)
         glEnable(GL_MULTISAMPLE);
