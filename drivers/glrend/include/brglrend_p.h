@@ -34,9 +34,9 @@ typedef struct br_gl_post_params {
 
 br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap *screen, br_boolean glow);
 void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap *screen, const br_gl_post_params *params);
-/* While post-processing: stop (or resume) the drawing writing depth, for translucent things (smoke) drawn
- * after the rest, so the effects see the surfaces behind them instead */
-void BR_PUBLIC_ENTRY BrGLPostProcessDepthWrite(br_pixelmap *screen, br_boolean enabled);
+/* While post-processing: take the depth drawn so far for the ambient occlusion, so what is drawn after it
+ * (sprites, smoke, sparks) neither casts nor receives it. Without it, the final depth is used */
+void BR_PUBLIC_ENTRY BrGLPostProcessDepthSnapshot(br_pixelmap *screen);
 
 #endif /* _NO_PROTOTYPES */
 

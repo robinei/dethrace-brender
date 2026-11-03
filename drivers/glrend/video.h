@@ -86,6 +86,8 @@ typedef struct _VIDEO {
         GLuint msaaFbo, msaaColour, msaaGlow, msaaDepth; /* multisampled target, when samples > 0 */
         GLuint resolveFbo, colourTex, glowTex, depthTex;
         GLuint aoFbo[2], aoTex[2]; /* ambient occlusion, half resolution (and a target for its blur) */
+        GLuint aoDepthFbo, aoDepthTex; /* the depth snapshot the ambient occlusion uses, see BrGLPostProcessDepthSnapshot */
+        int depthSnapshot;
         GLuint program, aoProgram;
         GLint uniforms[32], aoUniforms[8];
         /* the view: the largest perspective scene drawn while active */
@@ -93,7 +95,6 @@ typedef struct _VIDEO {
         float view[4]; /* x, y, width, height in window pixels */
         float proj[2]; /* projection x and y scale */
         float nearZ, farZ;
-        int noDepthWrite; /* draws leave the depth alone (see BrGLPostProcessDepthWrite) */
     } post;
 } VIDEO, *HVIDEO;
 

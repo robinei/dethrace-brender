@@ -46,7 +46,7 @@ static void apply_blend_mode(state_stack* self) {
     GL_CHECK_ERROR();
 }
 
-static void apply_depth_properties(HVIDEO hVideo, state_stack* state, uint32_t states) {
+static void apply_depth_properties(state_stack* state, uint32_t states) {
     br_boolean depth_valid = BR_TRUE; /* Defaulting to BR_TRUE to keep existing behaviour. */
     GLenum depth_test = GL_NONE;
 
@@ -72,7 +72,7 @@ static void apply_depth_properties(HVIDEO hVideo, state_stack* state, uint32_t s
     }
 
     if (states & MASK_STATE_PRIMITIVE) {
-        if ((state->prim.flags & PRIMF_DEPTH_WRITE) && !hVideo->post.noDepthWrite)
+        if (state->prim.flags & PRIMF_DEPTH_WRITE)
             glDepthMask(GL_TRUE);
         else
             glDepthMask(GL_FALSE);
@@ -405,7 +405,7 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
         model->fog_min = state->prim.fog_min;
         model->fog_max = state->prim.fog_max;
     }
-    apply_depth_properties(hVideo, state, states);
+    apply_depth_properties(state, states);
     GL_CHECK_ERROR();
 }
 

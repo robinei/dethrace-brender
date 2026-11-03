@@ -28,12 +28,12 @@
 
 enum {
     U_COLOUR, U_DEPTH, U_GLOW, U_AO, U_VIEW, U_PROJ, U_NEAR, U_FAR, U_TIME, U_SCALE, U_START, U_END, U_MAX_RADIUS,
-    U_GLOW_STRENGTH, U_FLARE_STRENGTH, U_AO_STRENGTH, U_SPEED, U_SHIMMER_COUNT, U_SHIMMERS, U_GRADE,
+    U_GLOW_STRENGTH, U_FLARE_STRENGTH, U_AO_STRENGTH, U_SPEED, U_SHIMMER_COUNT, U_SHIMMERS, U_GRADE, U_AO_DEPTH,
     U_COUNT
 };
 static const char* uniform_names[U_COUNT] = {
     "uColour", "uDepth", "uGlow", "uAO", "uView", "uProj", "uNear", "uFar", "uTime", "uScale", "uStart", "uEnd",
-    "uMaxRadius", "uGlowStrength", "uFlareStrength", "uAOStrength", "uSpeed", "uShimmerCount", "uShimmers", "uGrade"
+    "uMaxRadius", "uGlowStrength", "uFlareStrength", "uAOStrength", "uSpeed", "uShimmerCount", "uShimmers", "uGrade", "uAODepth"
 };
 enum {
     A_DEPTH, A_VIEW, A_PROJ, A_NEAR, A_FAR, A_RADIUS, A_AO, A_PASS,
@@ -52,6 +52,9 @@ static void delete_targets(HVIDEO hVideo) {
     glDeleteTextures(1, &hVideo->post.depthTex);
     glDeleteFramebuffers(2, hVideo->post.aoFbo);
     glDeleteTextures(2, hVideo->post.aoTex);
+    glDeleteFramebuffers(1, &hVideo->post.aoDepthFbo);
+    glDeleteTextures(1, &hVideo->post.aoDepthTex);
+    hVideo->post.aoDepthFbo = hVideo->post.aoDepthTex = 0;
     hVideo->post.msaaFbo = hVideo->post.msaaColour = hVideo->post.msaaGlow = hVideo->post.msaaDepth = 0;
     hVideo->post.resolveFbo = hVideo->post.colourTex = hVideo->post.glowTex = hVideo->post.depthTex = 0;
     hVideo->post.aoFbo[0] = hVideo->post.aoFbo[1] = hVideo->post.aoTex[0] = hVideo->post.aoTex[1] = 0;
@@ -85,6 +88,7 @@ static br_error create_targets(HVIDEO hVideo, int width, int height, int samples
     }
     hVideo->post.aoTex[0] = create_texture(GL_R8, (width + 1) / 2, (height + 1) / 2, GL_RED, GL_UNSIGNED_BYTE, GL_NEAREST, 0);
     hVideo->post.aoTex[1] = create_texture(GL_R8, (width + 1) / 2, (height + 1) / 2, GL_RED, GL_UNSIGNED_BYTE, GL_NEAREST, 0);
+    hVideo->post.aoDepthTex = create_texture(GL_DEPTH_COMPONENT24, width, height, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, GL_NEAREST, 0);
 
     glGenFramebuffers(1, &hVideo->post.resolveFbo);
     glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.resolveFbo);
@@ -105,6 +109,11 @@ static br_error create_targets(HVIDEO hVideo, int width, int height, int samples
         glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.aoFbo[i]);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, hVideo->post.aoTex[i], 0);
     }
+    glGenFramebuffers(1, &hVideo->post.aoDepthFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.aoDepthFbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, hVideo->post.aoDepthTex, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
 
     if (samples > 0) {
         glGenRenderbuffers(1, &hVideo->post.msaaColour);
@@ -214,6 +223,7 @@ br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap* screen, br_boolean gl
         glDrawBuffers(1, colour_only);
     }
     hVideo->post.viewArea = 0;
+    hVideo->post.depthSnapshot = 0;
     hVideo->post.active = 1;
     GL_CHECK_ERROR();
     return BRE_OK;
@@ -226,6 +236,7 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     GLint* u;
     GLint* a;
     int w, h, ao;
+    GLuint ao_depth;
     float near_z, far_z;
 
     if (self == NULL || self->screen != self) {
@@ -236,7 +247,6 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
         return;
     }
     hVideo->post.active = 0;
-    hVideo->post.noDepthWrite = 0;
     w = hVideo->post.width;
     h = hVideo->post.height;
     u = hVideo->post.uniforms;
@@ -254,6 +264,7 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     near_z = hVideo->post.nearZ;
     far_z = hVideo->post.farZ;
     ao = params->ao_strength > 0.0f && hVideo->post.viewArea > 0;
+    ao_depth = hVideo->post.depthSnapshot ? hVideo->post.aoDepthTex : hVideo->post.depthTex;
 
     if (hVideo->post.samples > 0) {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, hVideo->post.msaaFbo);
@@ -290,7 +301,7 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
         glViewport(0, 0, (w + 1) / 2, (h + 1) / 2);
         glUseProgram(hVideo->post.aoProgram);
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, hVideo->post.depthTex);
+        glBindTexture(GL_TEXTURE_2D, ao_depth);
         glUniform1i(a[A_DEPTH], 0);
         glUniform1i(a[A_AO], 1);
         glUniform1i(a[A_PASS], 0);
@@ -322,11 +333,14 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glBindTexture(GL_TEXTURE_2D, hVideo->post.glowTex);
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D, hVideo->post.aoTex[0]);
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_2D, ao_depth);
     glActiveTexture(GL_TEXTURE0);
     glUniform1i(u[U_COLOUR], 0);
     glUniform1i(u[U_DEPTH], 1);
     glUniform1i(u[U_GLOW], 2);
     glUniform1i(u[U_AO], 3);
+    glUniform1i(u[U_AO_DEPTH], 4);
     glUniform4fv(u[U_VIEW], 1, hVideo->post.view);
     glUniform2fv(u[U_PROJ], 1, hVideo->post.proj);
     glUniform1f(u[U_NEAR], near_z);
@@ -365,12 +379,34 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
 }
 
 /* Called by sceneBegin while post-processing: the largest perspective scene is the view */
-void BR_PUBLIC_ENTRY BrGLPostProcessDepthWrite(br_pixelmap* screen, br_boolean enabled) {
+void BR_PUBLIC_ENTRY BrGLPostProcessDepthSnapshot(br_pixelmap* screen) {
     br_device_pixelmap* self = (br_device_pixelmap*)screen;
+    HVIDEO hVideo;
+    GLuint scene_fbo;
+    GLboolean scissor;
+    int w, h;
 
-    if (self != NULL && self->screen == self) {
-        self->asFront.video.post.noDepthWrite = self->asFront.video.post.active && !enabled;
+    if (self == NULL || self->screen != self) {
+        return;
     }
+    hVideo = &self->asFront.video;
+    if (!hVideo->post.active || hVideo->post.aoDepthFbo == 0) {
+        return;
+    }
+    w = hVideo->post.width;
+    h = hVideo->post.height;
+    scene_fbo = hVideo->post.samples > 0 ? hVideo->post.msaaFbo : hVideo->post.resolveFbo;
+    scissor = glIsEnabled(GL_SCISSOR_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, scene_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, hVideo->post.aoDepthFbo);
+    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_FRAMEBUFFER, scene_fbo);
+    if (scissor) {
+        glEnable(GL_SCISSOR_TEST);
+    }
+    hVideo->post.depthSnapshot = 1;
+    GL_CHECK_ERROR();
 }
 
 void PostProcessRecordScene(HVIDEO hVideo, int x, int y, int w, int h, const br_matrix4* view_to_screen, br_token hint,
