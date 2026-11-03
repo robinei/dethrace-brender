@@ -112,6 +112,69 @@ static void apply_depth_properties(state_stack* state, uint32_t states) {
 }
 
 // take a pixelmap and palette and convert 8 bit to 32 bit just in time
+/*
+ * Glow mask of a paletted texture: its light source texels (by palette index, optionally limited to
+ * rectangles), as given by the device's texture_glow callback. Single channel, mipmapped like the colour.
+ */
+static void update_glow_texture(HVIDEO hVideo, br_buffer_stored* buffer) {
+    br_pixelmap* src = buffer->source;
+    const unsigned char* indices = NULL;
+    const short* rects = NULL;
+    int rect_count = 0;
+    float intensity;
+    br_uint_8* mask;
+    br_uint_8* src_px;
+    int x, y, r, any;
+
+    buffer->glow_checked = BR_TRUE;
+    buffer->glow_intensity = 0.0f;
+    if (hVideo->textureGlow == NULL || src == NULL || src->type != BR_PMT_INDEX_8 || src->pixels == NULL) {
+        return;
+    }
+    intensity = hVideo->textureGlow(src->identifier, &indices, &rects, &rect_count);
+    if (intensity <= 0.0f || indices == NULL) {
+        return;
+    }
+    mask = BrScratchAllocate(src->width * src->height);
+    src_px = src->pixels;
+    any = 0;
+    for (y = 0; y < src->height; y++) {
+        for (x = 0; x < src->width; x++) {
+            int index = src_px[y * src->row_bytes + x];
+            int lit = (indices[index >> 3] >> (index & 7)) & 1;
+            if (lit && rect_count > 0) {
+                lit = 0;
+                for (r = 0; r < rect_count; r++) {
+                    if (x >= rects[4 * r] && x < rects[4 * r] + rects[4 * r + 2] && y >= rects[4 * r + 1] && y < rects[4 * r + 1] + rects[4 * r + 3]) {
+                        lit = 1;
+                        break;
+                    }
+                }
+            }
+            mask[y * src->width + x] = lit ? 255 : 0;
+            any |= lit;
+        }
+    }
+    if (any) {
+        if (buffer->glow_tex == 0) {
+            glGenTextures(1, &buffer->glow_tex);
+        }
+        glBindTexture(GL_TEXTURE_2D, buffer->glow_tex);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, src->width, src->height, 0, GL_RED, GL_UNSIGNED_BYTE, mask);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, BufferStoredGLGetTexture(buffer));
+        buffer->glow_intensity = intensity;
+    }
+    BrScratchFree(mask);
+    GL_CHECK_ERROR();
+}
+
 static void update_paletted_texture(HVIDEO hVideo, br_pixelmap *src, br_uint_32 *palette) {
     int width = src->width, height = src->height;
     uint32_t* buffer = BrScratchAllocate(sizeof(uint32_t) * width * height);
@@ -249,6 +312,18 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
                 state->prim.colour_map->palette_revision = state->prim.colour_map->palette_pointer->revision;
             }
 
+            if (!state->prim.colour_map->glow_checked) {
+                update_glow_texture(hVideo, state->prim.colour_map);
+            }
+            if (state->prim.colour_map->glow_tex != 0 && state->prim.colour_map->glow_intensity > 0.0f) {
+                glActiveTexture(GL_TEXTURE1);
+                glBindTexture(GL_TEXTURE_2D, state->prim.colour_map->glow_tex);
+                glActiveTexture(GL_TEXTURE0);
+                glUniform1f(hVideo->brenderProgram.uniforms.glow_intensity, state->prim.colour_map->glow_intensity);
+            } else {
+                glUniform1f(hVideo->brenderProgram.uniforms.glow_intensity, 0.0f);
+            }
+
             // glUniform1i(hVideo->brenderProgram.uniforms.main_texture, hVideo->brenderProgram.mainTextureBinding);
             model->disable_texture = 0;
 
@@ -257,6 +332,7 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
             // todo?
             model->disable_colour_key = 0;
             glBindTexture(GL_TEXTURE_2D, tex_default);
+            glUniform1f(hVideo->brenderProgram.uniforms.glow_intensity, 0.0f);
             model->disable_texture = 1;
             // BrVector4Set(&model->surface_colour, 0, 1, 0, 1);
             // glBindTexture(GL_TEXTURE_2D, 27);

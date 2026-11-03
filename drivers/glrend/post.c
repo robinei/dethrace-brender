@@ -8,6 +8,9 @@
  * - Depth of field: a disc blur growing with distance, from dof_start to its strongest at dof_end. Samples
  *   only count when they are blurred enough to reach the pixel, so sharp nearer things do not bleed into
  *   the blurred distance around them.
+ * - Glow: with glow enabled, the 3d scenes also write their light sources (texels marked by the device's
+ *   texture_glow callback) to a second attachment. Its mipmap chain, sampled with a small tent at each
+ *   level and added up, makes a soft halo that is added over the image.
  */
 #include "drv.h"
 #include <brassert.h>
@@ -26,6 +29,8 @@ static const char post_vert[] =
 static const char post_frag[] =
     "#version 140\n"
     "uniform sampler2D uColour;\n"
+    "uniform sampler2D uGlow;\n"
+    "uniform float uGlowStrength;\n"
     "uniform sampler2D uDepth;\n"
     "uniform float uNear;\n"
     "uniform float uFar;\n"
@@ -43,14 +48,23 @@ static const char post_frag[] =
     "    float z = 2.0 * uNear * uFar / (uFar + uNear - (2.0 * d - 1.0) * (uFar - uNear));\n"
     "    return clamp((z - uStart) / max(uEnd - uStart, 0.0001), 0.0, 1.0);\n"
     "}\n"
-    "void main() {\n"
-    "    vec2 size = vec2(textureSize(uColour, 0));\n"
-    "    vec2 p = gl_FragCoord.xy;\n"
+    "vec3 bloom(vec2 uv) {\n"
+    "    const float weights[7] = float[7](0.12, 0.25, 0.45, 0.55, 0.5, 0.35, 0.2);\n"
+    "    vec3 sum = vec3(0.0);\n"
+    "    for (int level = 1; level <= 7; level++) {\n"
+    "        vec2 t = 0.75 / vec2(textureSize(uGlow, level));\n"
+    "        float l = float(level);\n"
+    "        vec3 c = textureLod(uGlow, uv + vec2(-t.x, -t.y), l).rgb + textureLod(uGlow, uv + vec2(t.x, -t.y), l).rgb\n"
+    "               + textureLod(uGlow, uv + vec2(-t.x, t.y), l).rgb + textureLod(uGlow, uv + vec2(t.x, t.y), l).rgb;\n"
+    "        sum += c * 0.25 * weights[level - 1];\n"
+    "    }\n"
+    "    return sum;\n"
+    "}\n"
+    "vec3 dof(vec2 p, vec2 size) {\n"
     "    vec3 centre = texelFetch(uColour, ivec2(p), 0).rgb;\n"
-    "    float radius = blur(p) * uMaxRadius;\n"
+    "    float radius = uMaxRadius > 0.0 ? blur(p) * uMaxRadius : 0.0;\n"
     "    if (radius < 0.5) {\n"
-    "        fragColour = vec4(centre, 1.0);\n"
-    "        return;\n"
+    "        return centre;\n"
     "    }\n"
     "    vec3 sum = centre;\n"
     "    float weight = 1.0;\n"
@@ -62,12 +76,23 @@ static const char post_frag[] =
     "        sum += texture(uColour, q / size).rgb * w;\n"
     "        weight += w;\n"
     "    }\n"
-    "    fragColour = vec4(sum / weight, 1.0);\n"
+    "    return sum / weight;\n"
+    "}\n"
+    "void main() {\n"
+    "    vec2 size = vec2(textureSize(uColour, 0));\n"
+    "    vec3 c = dof(gl_FragCoord.xy, size);\n"
+    "    if (uGlowStrength > 0.0) {\n"
+    "        c += bloom(gl_FragCoord.xy / size) * uGlowStrength;\n"
+    "    }\n"
+    "    fragColour = vec4(c, 1.0);\n"
     "}\n";
 
 static void delete_targets(HVIDEO hVideo) {
     glDeleteFramebuffers(1, &hVideo->post.msaaFbo);
     glDeleteRenderbuffers(1, &hVideo->post.msaaColour);
+    glDeleteRenderbuffers(1, &hVideo->post.msaaGlow);
+    glDeleteTextures(1, &hVideo->post.glowTex);
+    hVideo->post.msaaGlow = hVideo->post.glowTex = 0;
     glDeleteRenderbuffers(1, &hVideo->post.msaaDepth);
     glDeleteFramebuffers(1, &hVideo->post.resolveFbo);
     glDeleteTextures(1, &hVideo->post.colourTex);
@@ -77,7 +102,7 @@ static void delete_targets(HVIDEO hVideo) {
     hVideo->post.width = hVideo->post.height = 0;
 }
 
-static br_error create_targets(HVIDEO hVideo, int width, int height, int samples) {
+static br_error create_targets(HVIDEO hVideo, int width, int height, int samples, int glow) {
     delete_targets(hVideo);
 
     glGenTextures(1, &hVideo->post.colourTex);
@@ -96,9 +121,24 @@ static br_error create_targets(HVIDEO hVideo, int width, int height, int samples
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D, 0);
 
+    if (glow) {
+        glGenTextures(1, &hVideo->post.glowTex);
+        glBindTexture(GL_TEXTURE_2D, hVideo->post.glowTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
     glGenFramebuffers(1, &hVideo->post.resolveFbo);
     glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.resolveFbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, hVideo->post.colourTex, 0);
+    if (glow) {
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, hVideo->post.glowTex, 0);
+    }
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, hVideo->post.depthTex, 0);
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
         BR_WARNING0("GLREND: post-processing resolve framebuffer incomplete");
@@ -111,6 +151,11 @@ static br_error create_targets(HVIDEO hVideo, int width, int height, int samples
         glGenRenderbuffers(1, &hVideo->post.msaaColour);
         glBindRenderbuffer(GL_RENDERBUFFER, hVideo->post.msaaColour);
         glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_RGBA8, width, height);
+        if (glow) {
+            glGenRenderbuffers(1, &hVideo->post.msaaGlow);
+            glBindRenderbuffer(GL_RENDERBUFFER, hVideo->post.msaaGlow);
+            glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_RGBA8, width, height);
+        }
         glGenRenderbuffers(1, &hVideo->post.msaaDepth);
         glBindRenderbuffer(GL_RENDERBUFFER, hVideo->post.msaaDepth);
         glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH_COMPONENT24, width, height);
@@ -118,6 +163,9 @@ static br_error create_targets(HVIDEO hVideo, int width, int height, int samples
         glGenFramebuffers(1, &hVideo->post.msaaFbo);
         glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.msaaFbo);
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, hVideo->post.msaaColour);
+        if (glow) {
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_RENDERBUFFER, hVideo->post.msaaGlow);
+        }
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, hVideo->post.msaaDepth);
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
             BR_WARNING0("GLREND: post-processing multisampled framebuffer incomplete");
@@ -149,6 +197,8 @@ static br_boolean compile_program(HVIDEO hVideo) {
         return BR_FALSE;
     }
     hVideo->post.uColour = glGetUniformLocation(hVideo->post.program, "uColour");
+    hVideo->post.uGlow = glGetUniformLocation(hVideo->post.program, "uGlow");
+    hVideo->post.uGlowStrength = glGetUniformLocation(hVideo->post.program, "uGlowStrength");
     hVideo->post.uDepth = glGetUniformLocation(hVideo->post.program, "uDepth");
     hVideo->post.uNear = glGetUniformLocation(hVideo->post.program, "uNear");
     hVideo->post.uFar = glGetUniformLocation(hVideo->post.program, "uFar");
@@ -158,7 +208,7 @@ static br_boolean compile_program(HVIDEO hVideo) {
     return BR_TRUE;
 }
 
-br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap* screen) {
+br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap* screen, br_boolean glow) {
     br_device_pixelmap* self = (br_device_pixelmap*)screen;
     HVIDEO hVideo;
     int x, y, width, height;
@@ -179,14 +229,16 @@ br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap* screen) {
     DevicePixelmapGLGetViewport(self, &x, &y, &sx, &sy);
     width = 2 * x + (int)(self->pm_width * sx + 0.5f);
     height = 2 * y + (int)(self->pm_height * sy + 0.5f);
-    if (width != hVideo->post.width || height != hVideo->post.height || hVideo->post.resolveFbo == 0) {
+    glow = glow ? 1 : 0;
+    if (width != hVideo->post.width || height != hVideo->post.height || hVideo->post.resolveFbo == 0
+        || glow != (hVideo->post.glowTex != 0)) {
         /* match the window's multisampling */
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         samples = 0;
         if (hVideo->sampleBuffers) {
             glGetIntegerv(GL_SAMPLES, &samples);
         }
-        if (create_targets(hVideo, width, height, samples) != BRE_OK) {
+        if (create_targets(hVideo, width, height, samples, glow) != BRE_OK) {
             return BRE_FAIL;
         }
     }
@@ -196,7 +248,16 @@ br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap* screen) {
     glDepthMask(GL_TRUE);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClearDepth(1.0);
+    if (hVideo->post.glowTex != 0) {
+        static const GLenum both[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+        glDrawBuffers(2, both);
+    }
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    {
+        /* only the 3d scenes write the glow, see renderer.c */
+        static const GLenum colour_only[] = { GL_COLOR_ATTACHMENT0 };
+        glDrawBuffers(1, colour_only);
+    }
     hVideo->post.active = 1;
     GL_CHECK_ERROR();
     return BRE_OK;
@@ -222,7 +283,21 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     if (hVideo->post.samples > 0) {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, hVideo->post.msaaFbo);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, hVideo->post.resolveFbo);
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glDrawBuffer(GL_COLOR_ATTACHMENT0);
         glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+        if (hVideo->post.glowTex != 0) {
+            glReadBuffer(GL_COLOR_ATTACHMENT1);
+            glDrawBuffer(GL_COLOR_ATTACHMENT1);
+            glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            glReadBuffer(GL_COLOR_ATTACHMENT0);
+            glDrawBuffer(GL_COLOR_ATTACHMENT0);
+        }
+    }
+    if (hVideo->post.glowTex != 0) {
+        glBindTexture(GL_TEXTURE_2D, hVideo->post.glowTex);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, 0);
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -240,9 +315,13 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glBindTexture(GL_TEXTURE_2D, hVideo->post.colourTex);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, hVideo->post.depthTex);
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, hVideo->post.glowTex);
     glActiveTexture(GL_TEXTURE0);
     glUniform1i(hVideo->post.uColour, 0);
     glUniform1i(hVideo->post.uDepth, 1);
+    glUniform1i(hVideo->post.uGlow, 2);
+    glUniform1f(hVideo->post.uGlowStrength, hVideo->post.glowTex != 0 ? params->glow_strength : 0.0f);
     glUniform1f(hVideo->post.uNear, params->hither);
     glUniform1f(hVideo->post.uFar, params->yon);
     glUniform1f(hVideo->post.uStart, params->dof_start);
@@ -252,6 +331,8 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);
 
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE0);

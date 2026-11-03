@@ -35,6 +35,10 @@ typedef int BR_CALLBACK br_device_gl_overlayregions_cbfn(const float **regions);
 // Optional. Queried for each draw: when above 0, geometry fades out (to whatever was drawn behind it, eg. the
 // sky) between this fraction of the yon distance and the yon distance itself
 typedef float BR_CALLBACK br_device_gl_distancefade_cbfn(void);
+// Optional. Light sources of a paletted texture, by its pixelmap identifier: sets `indices` to a 256 bit mask of
+// the palette indices that glow and, if `rect_count` is set non-zero, `rects` to x, y, width, height of the
+// areas they are limited to. Returns the glow intensity, 0 for none.
+typedef float BR_CALLBACK br_device_gl_textureglow_cbfn(const char *identifier, const unsigned char **indices, const short **rects, int *rect_count);
 
 typedef struct br_device_gl_callback_procs {
     br_device_gl_getprocaddress_cbfn      *get_proc_address;
@@ -46,6 +50,7 @@ typedef struct br_device_gl_callback_procs {
     br_int_32                              texture_upscaler; /* 2x magnification of paletted textures: 0 = none, 1 = MMPX, 2 = xBR */
     br_device_gl_overlayregions_cbfn       *overlay_regions;
     br_device_gl_distancefade_cbfn         *distance_fade;
+    br_device_gl_textureglow_cbfn          *texture_glow;
     br_int_32                              fog_distance;    /* Non-zero: fog by distance, from fog_min to fully fogged at fog_max */
 } br_device_gl_callback_procs;
 

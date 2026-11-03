@@ -20,9 +20,10 @@ typedef struct br_gl_post_params {
     float hither, yon;          /* depth range of the view's camera */
     float dof_start, dof_end;   /* depth of field: distances where the blur starts and is at its strongest */
     float dof_max_radius;       /* strongest blur radius, in window pixels; 0 disables depth of field */
+    float glow_strength;        /* bloom around light sources (see texture_glow), if Begin was asked for it */
 } br_gl_post_params;
 
-br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap *screen);
+br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap *screen, br_boolean glow);
 void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap *screen, const br_gl_post_params *params);
 
 #endif /* _NO_PROTOTYPES */

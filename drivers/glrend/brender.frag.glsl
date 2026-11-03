@@ -85,10 +85,15 @@ in vec3 rawNormal;
 
 in vec3 v_frag_pos;
 
-out vec4 fragColour;
+layout (location = 0) out vec4 fragColour;
+// Light sources, for the post-processed bloom (only stored while the view is post-processed)
+layout (location = 1) out vec4 glowColour;
 
 uniform sampler2D main_texture;
 uniform bool alpha_to_coverage;
+// Glow mask of the texture (light source texels) and its strength; 0 for none
+uniform sampler2D glow_texture;
+uniform float glow_intensity;
 // Fog by distance from the eye, from fog_min to fully fogged at fog_max
 uniform bool fog_distance;
 // Above 0: fade out (alpha) from this fraction of yon_z to yon_z, by distance from the eye
@@ -186,7 +191,8 @@ void processClipPlanes() {
     }
 }
 
-void doDistanceFog() {
+// Applies the fog, returns its strength
+float doDistanceFog() {
     if (fog_enabled && fog_distance) {
         // distance rather than depth: the fog does not change as the view turns, and fully fogs geometry
         // before the yon plane clips it, also at the sides of a wide view
@@ -195,7 +201,7 @@ void doDistanceFog() {
         // dense early like the original (about half at a quarter of the way), then easing into full fog
         float f = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
         fragColour.rgb = mix(fragColour.rgb, fog_colour, f);
-        return;
+        return f;
     }
     if (fog_enabled) {
 
@@ -210,7 +216,9 @@ void doDistanceFog() {
         float density = 1/fog_max * FOGGING_EMULATE_3DFX_DENSITY_MULTIPLIER;
         float fogging_factor = 1.0 - exp(-density * linear_depth_normalized * linear_depth_normalized);
         fragColour.rgb = mix(fragColour.rgb, fog_colour, clamp(fogging_factor, 0.0, 1.0));
+        return clamp(fogging_factor, 0.0, 1.0);
     }
+    return 0.0;
 }
 
 void main() {
@@ -289,10 +297,19 @@ void main() {
         fragColour.rgb *= vec3(ka, ka, ka);
     }
 
-    doDistanceFog();
+    float fog = doDistanceFog();
 
     if (distance_fade > 0.0) {
         float d = length(position.xyz);
         fragColour.a *= 1.0 - smoothstep(distance_fade * yon_z, yon_z, d);
+    }
+
+    // Lights glow in their own (unlit) colour. Fog hides them; darkness only dims them a little, so lights
+    // stand out in the distance at night
+    glowColour = vec4(0.0, 0.0, 0.0, fragColour.a);
+    if (glow_intensity > 0.0 && !disable_texture) {
+        float g = texture(glow_texture, mappedUV).r * glow_intensity;
+        float hidden = fog * (fog_colour == vec3(0.0) ? 0.4 : 1.0);
+        glowColour.rgb = textureColour.rgb * g * (1.0 - hidden);
     }
 }

@@ -75,6 +75,9 @@ struct br_buffer_stored* BufferStoredGLAllocate(br_renderer* renderer, br_token 
     self->device = ObjectDevice(renderer);
     self->renderer = renderer;
     self->gl_tex = 0;
+    self->glow_tex = 0;
+    self->glow_intensity = 0.0f;
+    self->glow_checked = BR_FALSE;
     self->templates = BrTVTemplateAllocate(self, (br_tv_template_entry*)bufferStoredTemplateEntries,
         BR_ASIZE(bufferStoredTemplateEntries));
 
@@ -186,6 +189,7 @@ static br_error updateMemory(br_buffer_stored* self, br_pixelmap* pm) {
     if (pm->type == BR_PMT_INDEX_8) {
         // if paletted, then wait until we are displaying the texture to convert it to 32 bit
         self->paletted_source_dirty = BR_TRUE;
+        self->glow_checked = BR_FALSE;
         self->palette_pointer = ObjectDevice(self)->clut;
     } else if (pm->type == BR_PMT_RGB_565) {
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, pm->width, pm->height, format, type, pm->pixels);
@@ -243,6 +247,8 @@ static void BR_CMETHOD_DECL(br_buffer_stored_gl, free)(br_object* _self) {
 
     glDeleteTextures(1, &self->gl_tex);
     self->gl_tex = 0;
+    glDeleteTextures(1, &self->glow_tex);
+    self->glow_tex = 0;
 
     ObjectContainerRemove(self->renderer, (br_object*)self);
 }

@@ -120,6 +120,13 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
     /* Bind the model UBO here, it's faster than doing it for each model group */
     glBindBufferBase(GL_UNIFORM_BUFFER, hVideo->brenderProgram.blockBindingModel, hVideo->brenderProgram.uboModel);
     glUniform1i(hVideo->brenderProgram.uniforms.main_texture, hVideo->brenderProgram.mainTextureBinding);
+    glUniform1i(hVideo->brenderProgram.uniforms.glow_texture, 1);
+    glUniform1f(hVideo->brenderProgram.uniforms.glow_intensity, 0.0f);
+    if (hVideo->post.active && hVideo->post.glowTex != 0) {
+        /* light sources go to the glow attachment, for the post-processed bloom */
+        static const GLenum both[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+        glDrawBuffers(2, both);
+    }
     glUniform1i(hVideo->brenderProgram.uniforms.alpha_to_coverage, hVideo->sampleBuffers != 0);
     glUniform1i(hVideo->brenderProgram.uniforms.fog_distance, hVideo->fogDistance != 0);
 
@@ -142,6 +149,10 @@ void BR_CMETHOD_DECL(br_renderer_gl, sceneEnd)(br_renderer* self) {
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
     glBindVertexArray(0);
 
+    if (self->pixelmap->screen->asFront.video.post.active) {
+        static const GLenum colour_only[] = { GL_COLOR_ATTACHMENT0 };
+        glDrawBuffers(1, colour_only);
+    }
     /* keep rendering into the offscreen target of a post-processed view */
     glBindFramebuffer(GL_FRAMEBUFFER, self->pixelmap->screen->asFront.video.post.active
         ? (self->pixelmap->screen->asFront.video.post.samples > 0 ? self->pixelmap->screen->asFront.video.post.msaaFbo

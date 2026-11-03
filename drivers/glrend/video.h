@@ -22,6 +22,7 @@ typedef struct _VIDEO {
     br_int_32 textureUpscaler; /* 2x magnification of paletted textures: 0 = none, 1 = MMPX, 2 = xBR */
     br_int_32 fogDistance;     /* Fog by distance, from fog_min to fully fogged at fog_max */
     br_device_gl_distancefade_cbfn* distanceFade;
+    br_device_gl_textureglow_cbfn* textureGlow;
 
     struct {
         GLuint program;
@@ -56,6 +57,8 @@ typedef struct _VIDEO {
             GLint sharp_filter;      /* bool */
             GLint fog_distance;      /* bool */
             GLint distance_fade;     /* float */
+            GLint glow_texture;      /* sampler2D */
+            GLint glow_intensity;    /* float */
         } uniforms;
 
         GLuint uboScene;
@@ -75,10 +78,10 @@ typedef struct _VIDEO {
     struct {
         int active;
         int width, height, samples;
-        GLuint msaaFbo, msaaColour, msaaDepth; /* multisampled target, when samples > 0 */
-        GLuint resolveFbo, colourTex, depthTex;
+        GLuint msaaFbo, msaaColour, msaaGlow, msaaDepth; /* multisampled target, when samples > 0 */
+        GLuint resolveFbo, colourTex, glowTex, depthTex;
         GLuint program;
-        GLint uColour, uDepth, uNear, uFar, uStart, uEnd, uMaxRadius;
+        GLint uColour, uGlow, uDepth, uNear, uFar, uStart, uEnd, uMaxRadius, uGlowStrength;
     } post;
 } VIDEO, *HVIDEO;
 

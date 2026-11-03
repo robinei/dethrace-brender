@@ -55,6 +55,13 @@ typedef struct br_buffer_stored {
      */
     struct br_tv_template *templates;
 
+    /*
+     * Glow mask (light sources) of a paletted texture, from the device's texture_glow callback
+     */
+    GLuint glow_tex;
+    float glow_intensity;
+    br_boolean glow_checked;
+
     br_boolean paletted_source_dirty;
     br_uint_32 palette_revision;
     struct br_device_clut *palette_pointer;
