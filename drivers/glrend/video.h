@@ -70,6 +70,16 @@ typedef struct _VIDEO {
     } brenderProgram;
 
     GLint sampleBuffers; /* Non-zero if the default framebuffer is multisampled */
+
+    /* Post-processing of a view (see post.c): rendered offscreen between BrGLPostProcessBegin/End */
+    struct {
+        int active;
+        int width, height, samples;
+        GLuint msaaFbo, msaaColour, msaaDepth; /* multisampled target, when samples > 0 */
+        GLuint resolveFbo, colourTex, depthTex;
+        GLuint program;
+        GLint uColour, uDepth, uNear, uFar, uStart, uEnd, uMaxRadius;
+    } post;
 } VIDEO, *HVIDEO;
 
 #pragma pack(push, 16)

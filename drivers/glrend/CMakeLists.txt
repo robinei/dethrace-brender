@@ -60,6 +60,7 @@ set(RENDERER_FILES
         v1model.c
         mmpx.c
         xbr.c
+        post.c
 
         onscreen.c
 

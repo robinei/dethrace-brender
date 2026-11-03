@@ -142,7 +142,11 @@ void BR_CMETHOD_DECL(br_renderer_gl, sceneEnd)(br_renderer* self) {
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
     glBindVertexArray(0);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    /* keep rendering into the offscreen target of a post-processed view */
+    glBindFramebuffer(GL_FRAMEBUFFER, self->pixelmap->screen->asFront.video.post.active
+        ? (self->pixelmap->screen->asFront.video.post.samples > 0 ? self->pixelmap->screen->asFront.video.post.msaaFbo
+                                                                   : self->pixelmap->screen->asFront.video.post.resolveFbo)
+        : 0);
     glUseProgram(0);
     self->has_begun = 0;
     GL_CHECK_ERROR();
