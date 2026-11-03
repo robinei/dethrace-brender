@@ -7,7 +7,7 @@ precision highp float;
 ##endif
 
 // Post-processing of a view (see post.c), in this order: heat shimmer, depth of field, ambient occlusion,
-// speed blur, glow (bloom, light streaks and a lens ghost), colour grading
+// speed blur, glow (bloom and light streaks), colour grading
 uniform sampler2D uColour;
 uniform sampler2D uDepth;
 uniform sampler2D uGlow;
@@ -86,18 +86,18 @@ vec3 bloom(vec2 uv) {
     return sum;
 }
 
-// horizontal streaks through the lights, and a faint ghost mirrored through the centre of the view
+// horizontal streaks through the lights. The samples are a texel of the (quarter resolution) mip level apart,
+// so the bilinear lookups overlap into a smooth streak rather than separate copies of the light
 vec3 flare(vec2 uv, vec2 size) {
+    const int TAPS = 24;
     vec3 streak = vec3(0.0);
-    float step = 22.0 * uScale / size.x;
-    for (int k = 1; k <= 8; k++) {
-        float w = 1.0 - float(k) / 9.0;
+    float step = 4.0 / size.x;
+    for (int k = 1; k <= TAPS; k++) {
+        float w = 1.0 - float(k) / float(TAPS + 1);
         streak += (textureLod(uGlow, uv + vec2(float(k) * step, 0.0), 2.0).rgb
                  + textureLod(uGlow, uv - vec2(float(k) * step, 0.0), 2.0).rgb) * w * w;
     }
-    vec2 centre = (uView.xy + 0.5 * uView.zw) / size;
-    vec3 ghost = textureLod(uGlow, 2.0 * centre - uv, 5.0).rgb;
-    return streak * vec3(0.8, 0.9, 1.0) * 0.18 + ghost * vec3(0.6, 0.8, 1.0) * 0.25;
+    return streak * vec3(0.8, 0.9, 1.0) * 0.06;
 }
 
 // the ambient occlusion, upsampled with depth aware weights

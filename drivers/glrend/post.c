@@ -13,8 +13,7 @@
  * - Ambient occlusion (ssao.frag.glsl), at half resolution and upsampled with depth aware weights.
  * - Speed blur: a radial blur towards the edges of the view.
  * - Glow: with glow enabled the 3d scenes also write their light sources (texels marked by the device's
- *   texture_glow callback) to a second attachment. Its mipmap chain makes a bloom, light streaks and a
- *   lens ghost.
+ *   texture_glow callback) to a second attachment. Its mipmap chain makes a bloom and light streaks.
  * - Colour grading.
  */
 #include "drv.h"
