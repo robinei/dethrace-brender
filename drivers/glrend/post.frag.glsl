@@ -160,7 +160,9 @@ void main() {
         float ao = ambientOcclusion(p);
         // light sources aren't occluded
         float lit = uGlowStrength > 0.0 ? clamp(dot(textureLod(uGlow, p / size, 0.0).rgb, vec3(4.0)), 0.0, 1.0) : 0.0;
-        c *= mix(1.0, ao, uAOStrength * (1.0 - lit));
+        // up to 1 blends the occlusion in, above that it deepens (ao^strength)
+        float shade = uAOStrength <= 1.0 ? mix(1.0, ao, uAOStrength) : pow(ao, uAOStrength);
+        c *= mix(1.0, shade, 1.0 - lit);
     }
     if (uSpeed > 0.0) {
         // radial blur towards the edges of the view
