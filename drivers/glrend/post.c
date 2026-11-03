@@ -10,7 +10,7 @@
  * - Heat shimmer above given points (fires).
  * - Depth of field: a disc blur growing with distance. Samples only count when they are blurred enough to
  *   reach the pixel, so sharp nearer things do not bleed into the blurred distance around them.
- * - Ambient occlusion (ssao.frag.glsl), at half resolution and upsampled with depth aware weights.
+ * - Ambient occlusion (ssao.frag.glsl), at half resolution, blurred and upsampled with depth aware weights.
  * - Speed blur: a radial blur towards the edges of the view.
  * - Glow: with glow enabled the 3d scenes also write their light sources (texels marked by the device's
  *   texture_glow callback) to a second attachment. Its mipmap chain makes a bloom and light streaks.
@@ -36,10 +36,10 @@ static const char* uniform_names[U_COUNT] = {
     "uMaxRadius", "uGlowStrength", "uFlareStrength", "uAOStrength", "uSpeed", "uShimmerCount", "uShimmers", "uGrade"
 };
 enum {
-    A_DEPTH, A_VIEW, A_PROJ, A_NEAR, A_FAR, A_RADIUS,
+    A_DEPTH, A_VIEW, A_PROJ, A_NEAR, A_FAR, A_RADIUS, A_AO, A_PASS,
     A_COUNT
 };
-static const char* ao_uniform_names[A_COUNT] = { "uDepth", "uView", "uProj", "uNear", "uFar", "uRadius" };
+static const char* ao_uniform_names[A_COUNT] = { "uDepth", "uView", "uProj", "uNear", "uFar", "uRadius", "uAO", "uPass" };
 
 static void delete_targets(HVIDEO hVideo) {
     glDeleteFramebuffers(1, &hVideo->post.msaaFbo);
@@ -50,11 +50,11 @@ static void delete_targets(HVIDEO hVideo) {
     glDeleteTextures(1, &hVideo->post.colourTex);
     glDeleteTextures(1, &hVideo->post.glowTex);
     glDeleteTextures(1, &hVideo->post.depthTex);
-    glDeleteFramebuffers(1, &hVideo->post.aoFbo);
-    glDeleteTextures(1, &hVideo->post.aoTex);
+    glDeleteFramebuffers(2, hVideo->post.aoFbo);
+    glDeleteTextures(2, hVideo->post.aoTex);
     hVideo->post.msaaFbo = hVideo->post.msaaColour = hVideo->post.msaaGlow = hVideo->post.msaaDepth = 0;
     hVideo->post.resolveFbo = hVideo->post.colourTex = hVideo->post.glowTex = hVideo->post.depthTex = 0;
-    hVideo->post.aoFbo = hVideo->post.aoTex = 0;
+    hVideo->post.aoFbo[0] = hVideo->post.aoFbo[1] = hVideo->post.aoTex[0] = hVideo->post.aoTex[1] = 0;
     hVideo->post.width = hVideo->post.height = 0;
 }
 
@@ -83,7 +83,8 @@ static br_error create_targets(HVIDEO hVideo, int width, int height, int samples
     if (glow) {
         hVideo->post.glowTex = create_texture(GL_RGBA8, width, height, GL_RGBA, GL_UNSIGNED_BYTE, GL_LINEAR, 1);
     }
-    hVideo->post.aoTex = create_texture(GL_R8, (width + 1) / 2, (height + 1) / 2, GL_RED, GL_UNSIGNED_BYTE, GL_NEAREST, 0);
+    hVideo->post.aoTex[0] = create_texture(GL_R8, (width + 1) / 2, (height + 1) / 2, GL_RED, GL_UNSIGNED_BYTE, GL_NEAREST, 0);
+    hVideo->post.aoTex[1] = create_texture(GL_R8, (width + 1) / 2, (height + 1) / 2, GL_RED, GL_UNSIGNED_BYTE, GL_NEAREST, 0);
 
     glGenFramebuffers(1, &hVideo->post.resolveFbo);
     glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.resolveFbo);
@@ -99,9 +100,11 @@ static br_error create_targets(HVIDEO hVideo, int width, int height, int samples
         return BRE_FAIL;
     }
 
-    glGenFramebuffers(1, &hVideo->post.aoFbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.aoFbo);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, hVideo->post.aoTex, 0);
+    glGenFramebuffers(2, hVideo->post.aoFbo);
+    for (int i = 0; i < 2; i++) {
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.aoFbo[i]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, hVideo->post.aoTex[i], 0);
+    }
 
     if (samples > 0) {
         glGenRenderbuffers(1, &hVideo->post.msaaColour);
@@ -281,18 +284,30 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glBindVertexArray(self->asFront.screen_buffer_vao);
 
     if (ao) {
-        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.aoFbo);
+        /* ambient occlusion into aoTex[0], blurred horizontally into aoTex[1], and vertically back */
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.aoFbo[0]);
         glViewport(0, 0, (w + 1) / 2, (h + 1) / 2);
         glUseProgram(hVideo->post.aoProgram);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, hVideo->post.depthTex);
         glUniform1i(a[A_DEPTH], 0);
+        glUniform1i(a[A_AO], 1);
+        glUniform1i(a[A_PASS], 0);
         glUniform4fv(a[A_VIEW], 1, hVideo->post.view);
         glUniform2fv(a[A_PROJ], 1, hVideo->post.proj);
         glUniform1f(a[A_NEAR], near_z);
         glUniform1f(a[A_FAR], far_z);
         glUniform1f(a[A_RADIUS], params->ao_radius);
         glDrawArrays(GL_TRIANGLES, 0, 3);
+        for (int pass = 1; pass <= 2; pass++) {
+            glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.aoFbo[pass & 1]);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, hVideo->post.aoTex[(pass - 1) & 1]);
+            glUniform1i(a[A_PASS], pass);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+        }
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glActiveTexture(GL_TEXTURE0);
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -305,7 +320,7 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, hVideo->post.glowTex);
     glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, hVideo->post.aoTex);
+    glBindTexture(GL_TEXTURE_2D, hVideo->post.aoTex[0]);
     glActiveTexture(GL_TEXTURE0);
     glUniform1i(u[U_COLOUR], 0);
     glUniform1i(u[U_DEPTH], 1);
