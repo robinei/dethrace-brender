@@ -136,6 +136,14 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
             glUniform4fv(hVideo->brenderProgram.uniforms.spots, 3 * count, lights);
         }
     }
+    {
+        float surface[8] = { 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
+        if (hVideo->sceneSurface == NULL || !hVideo->sceneSurface(surface)) {
+            surface[3] = surface[7] = 0.0f;
+        }
+        glUniform4fv(hVideo->brenderProgram.uniforms.surface_sun, 1, &surface[0]);
+        glUniform4fv(hVideo->brenderProgram.uniforms.surface_up, 1, &surface[4]);
+    }
     glUniform1f(hVideo->brenderProgram.uniforms.glow_intensity, 0.0f);
     if (hVideo->post.active && hVideo->post.glowTex != 0) {
         /* light sources go to the glow attachment, for the post-processed bloom */

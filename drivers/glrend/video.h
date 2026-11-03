@@ -25,6 +25,7 @@ typedef struct _VIDEO {
     br_device_gl_textureglow_cbfn* textureGlow;
     br_device_gl_glowscale_cbfn* glowScale;
     br_device_gl_scenelighting_cbfn* sceneLighting;
+    br_device_gl_scenesurface_cbfn* sceneSurface;
 
     struct {
         GLuint program;
@@ -64,6 +65,8 @@ typedef struct _VIDEO {
             GLint scene_brightness;  /* float */
             GLint num_spots;         /* int */
             GLint spots;             /* vec4[3 * MAX] */
+            GLint surface_sun;       /* vec4 */
+            GLint surface_up;        /* vec4 */
         } uniforms;
 
         GLuint uboScene;

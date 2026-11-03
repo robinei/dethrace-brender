@@ -153,6 +153,47 @@ float blobShadow(vec3 p, vec3 n) {
     return shade;
 }
 
+// The unlit surfaces (the track and scenery): darker facing away from the sun (direction xyz, amount w), and a
+// large scale brightness variation over their model space (amount surface_up.w) to break up tiled textures
+uniform vec4 surface_sun;
+uniform vec4 surface_up;  // the world's up in view space
+
+float hash3(vec3 p) {
+    p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+
+float valueNoise(vec3 x) {
+    vec3 i = floor(x);
+    vec3 f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(hash3(i), hash3(i + vec3(1.0, 0.0, 0.0)), f.x),
+                   mix(hash3(i + vec3(0.0, 1.0, 0.0)), hash3(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
+               mix(mix(hash3(i + vec3(0.0, 0.0, 1.0)), hash3(i + vec3(1.0, 0.0, 1.0)), f.x),
+                   mix(hash3(i + vec3(0.0, 1.0, 1.0)), hash3(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);
+}
+
+vec3 surfaceShading(vec3 model_pos, vec3 p, vec3 n) {
+    vec3 shade = vec3(1.0);
+    if (surface_sun.w > 0.0 && dot(n, n) > 0.01) {
+        // relative to the ground, which keeps its brightness: walls turned away from the sun darken
+        if (dot(n, -p) < 0.0) {
+            n = -n;
+        }
+        float k = dot(n, surface_sun.xyz) - dot(surface_up.xyz, surface_sun.xyz);
+        shade *= clamp(1.0 + surface_sun.w * 0.2 * k, 0.6, 1.04);
+    }
+    if (surface_up.w > 0.0) {
+        // patches several metres across (the world unit is about 7m), two octaves, and a hint of warm/cool
+        float v = valueNoise(model_pos * 0.6) * 0.65 + valueNoise(model_pos * 1.9 + 17.0) * 0.35;
+        float t = valueNoise(model_pos * 0.35 + 5.0);
+        shade *= 1.0 + surface_up.w * 0.08 * (v - 0.5);
+        shade *= vec3(1.0 + surface_up.w * 0.012 * (t - 0.5), 1.0, 1.0 - surface_up.w * 0.012 * (t - 0.5));
+    }
+    return shade;
+}
+
 // Light scattered towards the eye by the air between it and p: for each light, the integral of 1/distance^2
 // along the view ray, weighted by the cone at the ray's closest point to the light
 vec3 spotHaze(vec3 p) {
@@ -357,6 +398,9 @@ void main() {
         fragColour.rgb = colour.rgb * textureColour.rgb;
     } else {
         fragColour.rgb = textureColour.rgb;
+        if (surface_sun.w > 0.0 || surface_up.w > 0.0) {
+            fragColour.rgb *= surfaceShading(rawPosition, position.xyz, normal.xyz);
+        }
     }
 
     float glowMask = 0.0;
