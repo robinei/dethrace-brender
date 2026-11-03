@@ -60,6 +60,7 @@ typedef struct br_buffer_stored {
      */
     GLuint glow_tex;
     float glow_intensity;
+    int glow_id;
     br_boolean glow_checked;
 
     br_boolean paletted_source_dirty;

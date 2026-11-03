@@ -39,11 +39,17 @@ typedef float BR_CALLBACK br_device_gl_distancefade_cbfn(void);
 // the palette indices that glow and, if `rect_count` is set non-zero, `rects` to x, y, width, height of the
 // areas they are limited to. Returns the glow intensity, 0 for none.
 // Optional. Queried at the start of each scene: sets `*brightness` (1 = normal, below 1 darkens the scene except
-// for light source texels, see texture_glow) and `*lights` to `count` spot lights of 8 floats each: view space
-// position, range, view space direction (normalised) and strength. Returns the light count.
+// for light source texels, see texture_glow) and `*lights` to `count` lights of 12 floats each: view space
+// position, range, view space direction (normalised; zero for a point light), strength, colour (rgb) and haze
+// (how much the light shows in the air, eg. headlight beams in fog). Lit surfaces get at most their normal
+// brightness. Returns the light count.
 #define BR_GL_MAX_SCENE_LIGHTS 32
+#define BR_GL_SCENE_LIGHT_FLOATS 12
 typedef int BR_CALLBACK br_device_gl_scenelighting_cbfn(float *brightness, const float **lights);
-typedef float BR_CALLBACK br_device_gl_textureglow_cbfn(const char *identifier, const unsigned char **indices, const short **rects, int *rect_count);
+typedef float BR_CALLBACK br_device_gl_textureglow_cbfn(const char *identifier, const unsigned char **indices, const short **rects, int *rect_count, int *id);
+// Optional. Queried when drawing with a glowing texture: scales its glow, by the `id` texture_glow gave it
+// (eg. brighter brake lights while braking)
+typedef float BR_CALLBACK br_device_gl_glowscale_cbfn(int id);
 
 typedef struct br_device_gl_callback_procs {
     br_device_gl_getprocaddress_cbfn      *get_proc_address;
@@ -56,6 +62,7 @@ typedef struct br_device_gl_callback_procs {
     br_device_gl_overlayregions_cbfn       *overlay_regions;
     br_device_gl_distancefade_cbfn         *distance_fade;
     br_device_gl_textureglow_cbfn          *texture_glow;
+    br_device_gl_glowscale_cbfn            *glow_scale;
     br_device_gl_scenelighting_cbfn        *scene_lighting;
     br_int_32                              fog_distance;    /* Non-zero: fog by distance, from fog_min to fully fogged at fog_max */
 } br_device_gl_callback_procs;

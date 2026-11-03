@@ -94,29 +94,58 @@ uniform bool alpha_to_coverage;
 // Glow mask of the texture (light source texels) and its strength; 0 for none
 uniform sampler2D glow_texture;
 uniform float glow_intensity;
-// Night: the scene is darkened to scene_brightness, except for light source texels, and lit by spot lights
-// (car headlights): position + range, then direction + strength, in view space
+// Night: the scene is darkened to scene_brightness, except for light source texels, and lit by lights (car
+// headlights, fires) in view space: position + range, direction (zero for a point light) + strength,
+// colour + haze
 #define MAX_SPOTS 32
 uniform float scene_brightness;
 uniform int num_spots;
-uniform vec4 spots[2 * MAX_SPOTS];
-// how much the spots light this fragment, also lifts the darkness depth cue
-float spotLight = 0.0;
+uniform vec4 spots[3 * MAX_SPOTS];
+// how much the lights light this fragment; also lifts the darkness depth cue
+vec3 spotLight = vec3(0.0);
 
-float spotLighting(vec3 p, vec3 n) {
-    float sum = 0.0;
+float spotCone(vec3 from_light, vec4 dir) {
+    return dot(dir.xyz, dir.xyz) < 0.25 ? 1.0 : smoothstep(0.82, 0.95, dot(from_light, dir.xyz));
+}
+
+vec3 spotLighting(vec3 p, vec3 n) {
+    vec3 sum = vec3(0.0);
     for (int i = 0; i < num_spots; i++) {
-        vec3 to_light = spots[2 * i].xyz - p;
+        vec3 to_light = spots[3 * i].xyz - p;
         float d = length(to_light);
-        float range = spots[2 * i].w;
+        float range = spots[3 * i].w;
         if (d >= range) {
             continue;
         }
         vec3 l = to_light / max(d, 0.0001);
-        float cone = smoothstep(0.82, 0.95, dot(-l, spots[2 * i + 1].xyz));
         float falloff = 1.0 - d / range;
         float facing = dot(n, n) > 0.01 ? max(dot(n, l), 0.0) * 0.8 + 0.2 : 1.0;
-        sum += cone * falloff * falloff * facing * spots[2 * i + 1].w;
+        sum += spots[3 * i + 2].rgb * (spotCone(-l, spots[3 * i + 1]) * falloff * falloff * facing * spots[3 * i + 1].w);
+    }
+    return sum;
+}
+
+// Light scattered towards the eye by the air between it and p: for each light, the integral of 1/distance^2
+// along the view ray, weighted by the cone at the ray's closest point to the light
+vec3 spotHaze(vec3 p) {
+    vec3 sum = vec3(0.0);
+    float len = length(p);
+    vec3 r = p / max(len, 0.0001);
+    for (int i = 0; i < num_spots; i++) {
+        float haze = spots[3 * i + 2].w;
+        if (haze <= 0.0) {
+            continue;
+        }
+        vec3 c = spots[3 * i].xyz;
+        float range = spots[3 * i].w;
+        float b = dot(c, r);
+        float h = sqrt(max(dot(c, c) - b * b, 0.0004));
+        float scatter = (atan((len - b) / h) + atan(b / h)) / h;
+        vec3 q = r * clamp(b, 0.0, len);
+        vec3 from_light = q - c;
+        float d = length(from_light);
+        float falloff = clamp(1.0 - d / range, 0.0, 1.0);
+        sum += spots[3 * i + 2].rgb * (haze * scatter * falloff * spotCone(from_light / max(d, 0.0001), spots[3 * i + 1]));
     }
     return sum;
 }
@@ -228,7 +257,7 @@ float doDistanceFog() {
         float f = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
         if (fog_colour == vec3(0.0)) {
             // headlights reach into the darkness
-            f *= 1.0 - clamp(spotLight, 0.0, 1.0);
+            f *= 1.0 - clamp(max(spotLight.r, max(spotLight.g, spotLight.b)), 0.0, 1.0);
         }
         fragColour.rgb = mix(fragColour.rgb, fog_colour * scene_brightness, f);
         return f;
@@ -312,7 +341,7 @@ void main() {
             spotLight = spotLighting(position.xyz, normalize(normal.xyz));
         }
         // lit up to the normal (daylight) brightness, not beyond, so close bright surfaces don't blow out
-        vec3 lit = fragColour.rgb * min(scene_brightness + spotLight * vec3(1.0, 0.95, 0.82), vec3(1.0));
+        vec3 lit = fragColour.rgb * min(scene_brightness + spotLight, vec3(1.0));
         fragColour.rgb = mix(lit, textureColour.rgb, clamp(glowMask, 0.0, 1.0) * (1.0 - scene_brightness));
     }
 
@@ -342,6 +371,9 @@ void main() {
     }
 
     float fog = doDistanceFog();
+    if (num_spots > 0) {
+        fragColour.rgb += spotHaze(position.xyz);
+    }
 
     if (distance_fade > 0.0) {
         float d = length(position.xyz);

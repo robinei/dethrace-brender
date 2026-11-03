@@ -131,7 +131,7 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
         glUniform1f(hVideo->brenderProgram.uniforms.scene_brightness, brightness);
         glUniform1i(hVideo->brenderProgram.uniforms.num_spots, lights != NULL ? count : 0);
         if (lights != NULL && count > 0) {
-            glUniform4fv(hVideo->brenderProgram.uniforms.spots, 2 * count, lights);
+            glUniform4fv(hVideo->brenderProgram.uniforms.spots, 3 * count, lights);
         }
     }
     glUniform1f(hVideo->brenderProgram.uniforms.glow_intensity, 0.0f);

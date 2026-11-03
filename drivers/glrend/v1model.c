@@ -131,7 +131,8 @@ static void update_glow_texture(HVIDEO hVideo, br_buffer_stored* buffer) {
     if (hVideo->textureGlow == NULL || src == NULL || src->type != BR_PMT_INDEX_8 || src->pixels == NULL) {
         return;
     }
-    intensity = hVideo->textureGlow(src->identifier, &indices, &rects, &rect_count);
+    buffer->glow_id = -1;
+    intensity = hVideo->textureGlow(src->identifier, &indices, &rects, &rect_count, &buffer->glow_id);
     if (intensity <= 0.0f || indices == NULL) {
         return;
     }
@@ -319,7 +320,8 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
                 glActiveTexture(GL_TEXTURE1);
                 glBindTexture(GL_TEXTURE_2D, state->prim.colour_map->glow_tex);
                 glActiveTexture(GL_TEXTURE0);
-                glUniform1f(hVideo->brenderProgram.uniforms.glow_intensity, state->prim.colour_map->glow_intensity);
+                glUniform1f(hVideo->brenderProgram.uniforms.glow_intensity, state->prim.colour_map->glow_intensity
+                        * (hVideo->glowScale != NULL ? hVideo->glowScale(state->prim.colour_map->glow_id) : 1.0f));
             } else {
                 glUniform1f(hVideo->brenderProgram.uniforms.glow_intensity, 0.0f);
             }
