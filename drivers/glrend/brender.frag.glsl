@@ -153,8 +153,9 @@ float blobShadow(vec3 p, vec3 n) {
     return shade;
 }
 
-// The unlit surfaces (the track and scenery): darker facing away from the sun (direction xyz, amount w), and a
-// large scale brightness variation over their model space (amount surface_up.w) to break up tiled textures
+// The textured surfaces with a normal (the track, scenery and cars, not sprites): darker facing away from the
+// sun (direction xyz, amount w), and a large scale brightness variation over their model space (amount
+// surface_up.w) to break up tiled textures
 uniform vec4 surface_sun;
 uniform vec4 surface_up;  // the world's up in view space
 
@@ -398,9 +399,11 @@ void main() {
         fragColour.rgb = colour.rgb * textureColour.rgb;
     } else {
         fragColour.rgb = textureColour.rgb;
-        if (surface_sun.w > 0.0 || surface_up.w > 0.0) {
-            fragColour.rgb *= surfaceShading(rawPosition, position.xyz, normal.xyz);
-        }
+    }
+    // (the track materials are lit or not as their files say, so this goes by whether there is a normal:
+    // not for the sprites)
+    if ((surface_sun.w > 0.0 || surface_up.w > 0.0) && !disable_texture && dot(normal.xyz, normal.xyz) > 0.01) {
+        fragColour.rgb *= surfaceShading(rawPosition, position.xyz, normalize(normal.xyz));
     }
 
     float glowMask = 0.0;
