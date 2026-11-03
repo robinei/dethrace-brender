@@ -169,11 +169,13 @@ void main() {
         float r = length(dir) / (0.5 * uView.w);
         float amount = uSpeed * smoothstep(0.35, 1.2, r);
         if (amount > 0.0) {
+            // closely spaced samples, offset per pixel, so bright lights smear instead of leaving copies
+            float jitter = fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
             vec3 sum = c;
-            for (int k = 1; k <= 6; k++) {
-                sum += texture(uColour, (p - dir * (0.009 * float(k) * amount)) / size).rgb;
+            for (int k = 1; k <= 12; k++) {
+                sum += texture(uColour, (p - dir * (0.0045 * (float(k) - jitter) * amount)) / size).rgb;
             }
-            c = mix(c, sum / 7.0, clamp(amount * 1.5, 0.0, 1.0));
+            c = mix(c, sum / 13.0, clamp(amount * 1.5, 0.0, 1.0));
         }
     }
     if (uGlowStrength > 0.0) {
