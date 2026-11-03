@@ -175,12 +175,13 @@ float valueNoise(vec3 x) {
                    mix(hash3(i + vec3(0.0, 1.0, 1.0)), hash3(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);
 }
 
-vec3 surfaceShading(vec3 model_pos, vec3 p) {
+vec3 surfaceShading(vec3 model_pos, vec3 p, vec3 vertex_n) {
     vec3 shade = vec3(1.0);
     if (surface_sun.w > 0.0) {
         // relative to the ground, which keeps its brightness: walls turned away from the sun darken. The face's
-        // own (flat) normal, of the side seen: the vertex normals are averaged over neighbouring faces (tilted
-        // where the road meets kerbs and walls, and turning which side they face with the view)
+        // own (flat) normal, of the side seen; and the (smooth) vertex normal turned to the same side, where it
+        // is close to it: across gentle folds (faceted rock, banks) the shading is smooth, at creases (the road
+        // against a wall, where the vertex normals are averaged to halfway) it stays the face's own
         vec3 n = cross(dFdx(p), dFdy(p));
         if (dot(n, n) < 1e-20) {
             return shade;
@@ -189,14 +190,24 @@ vec3 surfaceShading(vec3 model_pos, vec3 p) {
         if (dot(n, -p) < 0.0) {
             n = -n;
         }
+        if (dot(vertex_n, vertex_n) > 0.01) {
+            vec3 v = normalize(vertex_n);
+            float c = dot(v, n);
+            if (c < 0.0) {
+                v = -v;
+                c = -c;
+            }
+            n = normalize(mix(n, v, smoothstep(0.8, 0.95, c)));
+        }
         float k = dot(n, surface_sun.xyz) - dot(surface_up.xyz, surface_sun.xyz);
         shade *= clamp(1.0 + surface_sun.w * 0.2 * k, 0.6, 1.04);
     }
     if (surface_up.w > 0.0) {
         // patches several metres across (the world unit is about 7m), two octaves, and a hint of warm/cool
-        float v = valueNoise(model_pos * 0.6) * 0.65 + valueNoise(model_pos * 1.9 + 17.0) * 0.35;
+        // (the large patches stronger than the finer ones)
+        float v = 0.14 * (valueNoise(model_pos * 0.6) - 0.5) + 0.05 * (valueNoise(model_pos * 1.9 + 17.0) - 0.5);
         float t = valueNoise(model_pos * 0.35 + 5.0);
-        shade *= 1.0 + surface_up.w * 0.08 * (v - 0.5);
+        shade *= 1.0 + surface_up.w * v;
         shade *= vec3(1.0 + surface_up.w * 0.012 * (t - 0.5), 1.0, 1.0 - surface_up.w * 0.012 * (t - 0.5));
     }
     return shade;
@@ -410,7 +421,7 @@ void main() {
     // (the track materials are lit or not as their files say, so this goes by whether there is a normal:
     // not for the sprites)
     if ((surface_sun.w > 0.0 || surface_up.w > 0.0) && !disable_texture && dot(normal.xyz, normal.xyz) > 0.01) {
-        fragColour.rgb *= surfaceShading(rawPosition, position.xyz);
+        fragColour.rgb *= surfaceShading(rawPosition, position.xyz, normal.xyz);
     }
 
     float glowMask = 0.0;
