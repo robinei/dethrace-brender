@@ -2,6 +2,7 @@
  * Renderer methods
  */
 #include "drv.h"
+#include <string.h>
 #include "brassert.h"
 
 /*
@@ -143,6 +144,7 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
         }
         glUniform4fv(hVideo->brenderProgram.uniforms.surface_sun, 1, &surface[0]);
         glUniform4fv(hVideo->brenderProgram.uniforms.surface_up, 1, &surface[4]);
+        memcpy(hVideo->sceneSurfaceUploaded, surface, sizeof(surface));
     }
     glUniform1f(hVideo->brenderProgram.uniforms.glow_intensity, 0.0f);
     if (hVideo->post.active && hVideo->post.glowTex != 0) {

@@ -53,8 +53,11 @@ typedef float BR_CALLBACK br_device_gl_glowscale_cbfn(int id);
 // Optional. Queried at the start of each scene, for the textured surfaces with normals: sets 8 floats,
 // the sun's direction (towards it) in view space and how much surfaces facing away from it darken (0 = none),
 // then the world's up in view space and how much a large scale brightness variation breaks up the tiled
-// textures (0 = none). Returns non-zero to use them
+// textures (0 = none). Returns non-zero to use them. Also queried for each draw, so it can change within a scene
 typedef int BR_CALLBACK br_device_gl_scenesurface_cbfn(float *params);
+// Optional. Queried for each draw: zero to leave the depth buffer alone (eg. for the sky, so the effects
+// reading depth take it for infinitely far)
+typedef int BR_CALLBACK br_device_gl_depthwrite_cbfn(void);
 
 typedef struct br_device_gl_callback_procs {
     br_device_gl_getprocaddress_cbfn      *get_proc_address;
@@ -70,6 +73,7 @@ typedef struct br_device_gl_callback_procs {
     br_device_gl_glowscale_cbfn            *glow_scale;
     br_device_gl_scenelighting_cbfn        *scene_lighting;
     br_device_gl_scenesurface_cbfn         *scene_surface;
+    br_device_gl_depthwrite_cbfn           *depth_write;
     br_int_32                              fog_distance;    /* Non-zero: fog by distance, from fog_min to fully fogged at fog_max */
 } br_device_gl_callback_procs;
 

@@ -26,6 +26,8 @@ typedef struct _VIDEO {
     br_device_gl_glowscale_cbfn* glowScale;
     br_device_gl_scenelighting_cbfn* sceneLighting;
     br_device_gl_scenesurface_cbfn* sceneSurface;
+    br_device_gl_depthwrite_cbfn* depthWrite;
+    float sceneSurfaceUploaded[8]; /* the scene_surface parameters last given to the shader */
 
     struct {
         GLuint program;

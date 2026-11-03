@@ -46,7 +46,7 @@ static void apply_blend_mode(state_stack* self) {
     GL_CHECK_ERROR();
 }
 
-static void apply_depth_properties(state_stack* state, uint32_t states) {
+static void apply_depth_properties(HVIDEO hVideo, state_stack* state, uint32_t states) {
     br_boolean depth_valid = BR_TRUE; /* Defaulting to BR_TRUE to keep existing behaviour. */
     GLenum depth_test = GL_NONE;
 
@@ -72,7 +72,7 @@ static void apply_depth_properties(state_stack* state, uint32_t states) {
     }
 
     if (states & MASK_STATE_PRIMITIVE) {
-        if (state->prim.flags & PRIMF_DEPTH_WRITE)
+        if ((state->prim.flags & PRIMF_DEPTH_WRITE) && (hVideo->depthWrite == NULL || hVideo->depthWrite()))
             glDepthMask(GL_TRUE);
         else
             glDepthMask(GL_FALSE);
@@ -378,6 +378,18 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
         blending_on = (state->prim.flags & PRIMF_BLEND) || (state->prim.colour_map != NULL && state->prim.colour_map->blended);
         fade = hVideo->distanceFade != NULL ? hVideo->distanceFade() : 0.0f;
         glUniform1f(hVideo->brenderProgram.uniforms.distance_fade, fade);
+        if (hVideo->sceneSurface != NULL) {
+            /* it can change within a scene (off for the sky) */
+            float surface[8] = { 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
+            if (!hVideo->sceneSurface(surface)) {
+                surface[3] = surface[7] = 0.0f;
+            }
+            if (memcmp(surface, hVideo->sceneSurfaceUploaded, sizeof(surface)) != 0) {
+                glUniform4fv(hVideo->brenderProgram.uniforms.surface_sun, 1, &surface[0]);
+                glUniform4fv(hVideo->brenderProgram.uniforms.surface_up, 1, &surface[4]);
+                memcpy(hVideo->sceneSurfaceUploaded, surface, sizeof(surface));
+            }
+        }
         glUniform1i(hVideo->brenderProgram.uniforms.alpha_to_coverage, hVideo->sampleBuffers != 0 && (blending_on || fade <= 0.0f));
         if (blending_on) {
             glEnable(GL_BLEND);
@@ -405,7 +417,7 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
         model->fog_min = state->prim.fog_min;
         model->fog_max = state->prim.fog_max;
     }
-    apply_depth_properties(state, states);
+    apply_depth_properties(hVideo, state, states);
     GL_CHECK_ERROR();
 }
 
