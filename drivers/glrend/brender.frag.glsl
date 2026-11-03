@@ -311,7 +311,8 @@ void main() {
         if (num_spots > 0) {
             spotLight = spotLighting(position.xyz, normalize(normal.xyz));
         }
-        vec3 lit = fragColour.rgb * (scene_brightness + spotLight * vec3(1.0, 0.95, 0.82));
+        // lit up to the normal (daylight) brightness, not beyond, so close bright surfaces don't blow out
+        vec3 lit = fragColour.rgb * min(scene_brightness + spotLight * vec3(1.0, 0.95, 0.82), vec3(1.0));
         fragColour.rgb = mix(lit, textureColour.rgb, clamp(glowMask, 0.0, 1.0) * (1.0 - scene_brightness));
     }
 
