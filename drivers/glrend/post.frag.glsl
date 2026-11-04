@@ -348,32 +348,66 @@ vec2 atLeast(vec2 v, float least) {
     return l < least ? (l > 1e-6 ? v * (least / l) : vec2(least, 0.0)) : v;
 }
 
-// How much the point at map coordinates m (of `level`) is in the sun's shadow, 0..1: bilinear comparisons at a
-// grid of taps over the pixel's footprint in the map (ax, ay: across the pixel, in texels; at least 3 texels, for
-// soft edges), one more along each than it spans texels (4 to 6), so far off and at grazing angles thin shadows
-// aren't stepped over (they flickered); each counting only what is more than `gap` (world units) nearer the sun.
-// zx, zy: how the surface's depth in the map changes across the pixel, so each tap compares with the surface's
-// own depth there (else on surfaces sloping away from the sun a wide filter shadowed them with themselves)
+// How much the point at map coordinates m (of `level`) is in the sun's shadow, 0..1, with soft edges as the sun
+// casts them (contact hardening): first a search around it for what lies nearer the sun, whose average distance
+// from the surface sizes the blur (the sun is a disc about half a degree across: crisp where the shadow meets its
+// caster, softer the further it falls from it); then a Gaussian weighted grid of bilinear comparisons over that,
+// and over at least the pixel's footprint in the map (ax, ay: across the pixel, in texels), so far off and at
+// grazing angles thin shadows aren't stepped over (they flickered). zx, zy: how the surface's depth in the map
+// changes across the pixel, so each tap compares with the surface's own depth there (else on surfaces sloping
+// from the sun a wide filter shadowed them with themselves). Only what is more than `gap` (world units) nearer the
+// sun counts
 float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float zx, float zy, float gap) {
-    // (the map's depth is linear over its depth range: 2 / its projection's z scale)
-    float threshold = m.z - gap * abs(uShadowProj[level][2][2]) * 0.5 - 0.00005;
+    // (the map's depth is linear over its depth range: 2 / its projection's z scale, so a world unit is this much)
+    float depth_per_unit = abs(uShadowProj[level][2][2]) * 0.5;
+    float threshold = m.z - gap * depth_per_unit - 0.00005;
     float texels = 1.0 / uShadowTexel[level];
+    // (a texel in world units: the map's width, 2 / its projection's x scale, over its texels)
+    float texel = 2.0 / uShadowProj[level][0][0] * uShadowTexel[level];
     int last = int(texels) - 1;
-    // (at least 3 texels: soft enough that the edges of moving shadows, the cars', glide across the texels
-    // instead of flipping them; about 7cm close up)
-    vec2 a = atLeast(ax, 3.0);
-    vec2 b = atLeast(ay, 3.0);
-    // (the depth change along a and b: the footprint's, scaled as they were widened)
+    vec2 f = m.xy * texels - 0.5;
+    // the surface's depth change per texel along the map's axes (from the footprint), for the search
+    // (the gradient g with dot(g, ax) = zx and dot(g, ay) = zy)
+    float det = ax.x * ay.y - ax.y * ay.x;
+    vec2 dz = abs(det) > 1e-8 ? vec2(zx * ay.y - zy * ax.y, zy * ax.x - zx * ay.x) / det : vec2(0.0);
+
+    // the search: 6x6 texels around, out to where the softest penumbra would reach (casters up to ~20 units
+    // away), at most 16 texels (so thin casters aren't stepped over)
+    float search = clamp(20.0 * 0.0093 / texel, 1.5, 16.0);
+    float blocker = 0.0;
+    float blockers = 0.0;
+    for (int j = 0; j < 6; j++) {
+        for (int i = 0; i < 6; i++) {
+            vec2 o = (vec2(float(i), float(j)) / 5.0 - 0.5) * 2.0 * search;
+            float d = shadowDepth(level, clamp(ivec2(floor(f + o + 0.5)), ivec2(0), ivec2(last)));
+            if (d < threshold + dot(dz, o)) {
+                blocker += d - dot(dz, o);
+                blockers += 1.0;
+            }
+        }
+    }
+    if (blockers == 0.0) {
+        return 0.0;
+    }
+    // the penumbra, in texels: the casters' distance times the sun's width, at least a texel and a half
+    float caster_distance = max(m.z - blocker / blockers, 0.0) / depth_per_unit;
+    float penumbra = max(caster_distance * 0.0093 * 1.3 / texel, 1.5);
+
+    // the filter: the penumbra wide, and at least the footprint
+    vec2 a = atLeast(ax, penumbra);
+    vec2 b = atLeast(ay, penumbra);
     float za = zx * min(length(a) / max(length(ax), 1e-6), 64.0);
     float zb = zy * min(length(b) / max(length(ay), 1e-6), 64.0);
-    int nx = int(clamp(ceil(length(a)) + 1.0, 4.0, 6.0));
-    int ny = int(clamp(ceil(length(b)) + 1.0, 4.0, 6.0));
-    vec2 f = m.xy * texels - 0.5;
+    int nx = int(clamp(ceil(length(a)) + 1.0, 4.0, 7.0));
+    int ny = int(clamp(ceil(length(b)) + 1.0, 4.0, 7.0));
     float sum = 0.0;
+    float weights = 0.0;
     for (int j = 0; j < ny; j++) {
         for (int i = 0; i < nx; i++) {
-            float u = (float(i) + 0.5) / float(nx) - 0.5;
-            float v = (float(j) + 0.5) / float(ny) - 0.5;
+            // over twice the width, Gaussian weighted (a smooth ramp, its width about the penumbra's)
+            float u = ((float(i) + 0.5) / float(nx) - 0.5) * 2.0;
+            float v = ((float(j) + 0.5) / float(ny) - 0.5) * 2.0;
+            float w = exp(-2.5 * (u * u + v * v));
             vec2 g = f + a * u + b * v;
             float tap_threshold = threshold + za * u + zb * v;
             ivec2 t = ivec2(floor(g));
@@ -382,10 +416,11 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float zx, float zy, float ga
             float s10 = shadowDepth(level, clamp(t + ivec2(1, 0), ivec2(0), ivec2(last))) < tap_threshold ? 1.0 : 0.0;
             float s01 = shadowDepth(level, clamp(t + ivec2(0, 1), ivec2(0), ivec2(last))) < tap_threshold ? 1.0 : 0.0;
             float s11 = shadowDepth(level, clamp(t + ivec2(1, 1), ivec2(0), ivec2(last))) < tap_threshold ? 1.0 : 0.0;
-            sum += mix(mix(s00, s10, fr.x), mix(s01, s11, fr.x), fr.y);
+            sum += w * mix(mix(s00, s10, fr.x), mix(s01, s11, fr.x), fr.y);
+            weights += w;
         }
     }
-    return sum / float(nx * ny);
+    return sum / weights;
 }
 
 // the view space direction through window pixel q
