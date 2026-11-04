@@ -351,27 +351,35 @@ vec2 atLeast(vec2 v, float least) {
 // How much the point at map coordinates m (of `level`) is in the sun's shadow, 0..1: bilinear comparisons at a
 // grid of taps over the pixel's footprint in the map (ax, ay: across the pixel, in texels; at least 2 texels, for
 // soft edges), as many along each as it spans texels (2 to 6), so far off and at grazing angles thin shadows
-// aren't stepped over (they flickered); each counting only what is more than `gap` (world units) nearer the sun
-float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float gap) {
+// aren't stepped over (they flickered); each counting only what is more than `gap` (world units) nearer the sun.
+// zx, zy: how the surface's depth in the map changes across the pixel, so each tap compares with the surface's
+// own depth there (else on surfaces sloping away from the sun a wide filter shadowed them with themselves)
+float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float zx, float zy, float gap) {
     // (the map's depth is linear over its depth range: 2 / its projection's z scale)
     float threshold = m.z - gap * abs(uShadowProj[level][2][2]) * 0.5 - 0.00005;
     float texels = 1.0 / uShadowTexel[level];
     int last = int(texels) - 1;
     vec2 a = atLeast(ax, 2.0);
     vec2 b = atLeast(ay, 2.0);
+    // (the depth change along a and b: the footprint's, scaled as they were widened)
+    float za = zx * min(length(a) / max(length(ax), 1e-6), 64.0);
+    float zb = zy * min(length(b) / max(length(ay), 1e-6), 64.0);
     int nx = int(clamp(ceil(length(a)), 2.0, 6.0));
     int ny = int(clamp(ceil(length(b)), 2.0, 6.0));
     vec2 f = m.xy * texels - 0.5;
     float sum = 0.0;
     for (int j = 0; j < ny; j++) {
         for (int i = 0; i < nx; i++) {
-            vec2 g = f + a * ((float(i) + 0.5) / float(nx) - 0.5) + b * ((float(j) + 0.5) / float(ny) - 0.5);
+            float u = (float(i) + 0.5) / float(nx) - 0.5;
+            float v = (float(j) + 0.5) / float(ny) - 0.5;
+            vec2 g = f + a * u + b * v;
+            float tap_threshold = threshold + za * u + zb * v;
             ivec2 t = ivec2(floor(g));
             vec2 fr = g - floor(g);
-            float s00 = shadowDepth(level, clamp(t, ivec2(0), ivec2(last))) < threshold ? 1.0 : 0.0;
-            float s10 = shadowDepth(level, clamp(t + ivec2(1, 0), ivec2(0), ivec2(last))) < threshold ? 1.0 : 0.0;
-            float s01 = shadowDepth(level, clamp(t + ivec2(0, 1), ivec2(0), ivec2(last))) < threshold ? 1.0 : 0.0;
-            float s11 = shadowDepth(level, clamp(t + ivec2(1, 1), ivec2(0), ivec2(last))) < threshold ? 1.0 : 0.0;
+            float s00 = shadowDepth(level, clamp(t, ivec2(0), ivec2(last))) < tap_threshold ? 1.0 : 0.0;
+            float s10 = shadowDepth(level, clamp(t + ivec2(1, 0), ivec2(0), ivec2(last))) < tap_threshold ? 1.0 : 0.0;
+            float s01 = shadowDepth(level, clamp(t + ivec2(0, 1), ivec2(0), ivec2(last))) < tap_threshold ? 1.0 : 0.0;
+            float s11 = shadowDepth(level, clamp(t + ivec2(1, 1), ivec2(0), ivec2(last))) < tap_threshold ? 1.0 : 0.0;
             sum += mix(mix(s00, s10, fr.x), mix(s01, s11, fr.x), fr.y);
         }
     }
@@ -415,11 +423,13 @@ float shadowLevels(vec2 p, vec3 P, vec3 n, float facing, float gap, bool sprite)
         float fade = clamp(min(e.x, e.y), 0.0, 1.0);
         // the footprint: across the pixel, in this map's texels (at most 64 texels, against stray rays)
         vec3 m0 = shadowCoord(level, P);
-        vec2 ax = (shadowCoord(level, Px).xy - m0.xy) * texels;
-        vec2 ay = (shadowCoord(level, Py).xy - m0.xy) * texels;
-        ax *= min(1.0, 64.0 / max(length(ax), 1e-6));
-        ay *= min(1.0, 64.0 / max(length(ay), 1e-6));
-        float s = shadowed(level, m, ax, ay, gap);
+        vec3 dx = shadowCoord(level, Px) - m0;
+        vec3 dy = shadowCoord(level, Py) - m0;
+        vec2 ax = dx.xy * texels;
+        vec2 ay = dy.xy * texels;
+        float kx = min(1.0, 64.0 / max(length(ax), 1e-6));
+        float ky = min(1.0, 64.0 / max(length(ay), 1e-6));
+        float s = shadowed(level, m, ax * kx, ay * ky, sprite ? 0.0 : dx.z * kx, sprite ? 0.0 : dy.z * ky, gap);
         result += remaining * fade * s;
         remaining *= 1.0 - fade;
         if (remaining <= 0.001) {
