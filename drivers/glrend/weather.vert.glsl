@@ -84,9 +84,9 @@ void main() {
         // at most a tenth of the view's height
         float most = 0.1 * uView.w * px.y;
         along *= min(1.0, most / max(length(along), 1e-6));
-        // about 2cm wide, at least the least size
-        float width = 0.003 * uProj.y * 0.5 * uView.w / -v.z;
-        float least = 0.6 * uMinPixels * max(uScale, 0.5);
+        // about 1cm wide, at least the least size
+        float width = 0.0015 * uProj.y * 0.5 * uView.w / -v.z;
+        float least = 0.4 * uMinPixels * max(uScale, 0.5);
         vSub = min(1.0, width / least);
         vec2 across = normalize(vec2(-along.y, along.x) / px) * px * max(width, least);
         gl_Position = vec4(a + along * (c.y * 0.5 + 0.5) + across * c.x, 0.0, 1.0);

@@ -29,7 +29,9 @@ void main() {
     float scene = linearDepth(texelFetch(uDepth, ivec2(gl_FragCoord.xy), 0).r);
     // a little soft where it meets what is behind
     float visible = clamp((scene - vDepth) / 0.03, 0.0, 1.0);
-    float shape = uRain > 0.5 ? 1.0 - abs(vCorner.x) : 1.0 - smoothstep(0.3, 1.0, length(vCorner));
+    // (a drop's streak fading out towards its top, where it was a moment ago)
+    float streak = 0.5 - 0.5 * vCorner.y;
+    float shape = uRain > 0.5 ? (1.0 - abs(vCorner.x)) * streak * streak : 1.0 - smoothstep(0.3, 1.0, length(vCorner));
     float a = shape * visible * vFade * vSub * (uRain > 0.5 ? 0.5 : 0.8) * min(uAmount, 1.0);
     if (a <= 0.003) {
         discard;
