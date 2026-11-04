@@ -240,7 +240,6 @@ br_device_pixelmap* DevicePixelmapGLAllocateFront(br_device* dev, br_output_faci
     self->asFront.video.textureSharp = pt.callbacks->texture_sharp;
     self->asFront.video.textureUpscaler = pt.callbacks->texture_upscaler;
     self->asFront.video.fogDistance = pt.callbacks->fog_distance;
-    self->asFront.video.distanceFade = pt.callbacks->distance_fade;
     self->asFront.video.textureGlow = pt.callbacks->texture_glow;
     self->asFront.video.glowScale = pt.callbacks->glow_scale;
     self->asFront.video.textureReflect = pt.callbacks->texture_reflect;

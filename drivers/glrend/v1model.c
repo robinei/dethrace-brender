@@ -359,7 +359,6 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
 
         GLenum minFilter, magFilter;
         GLfloat maxAnisotropy;
-        GLfloat fade;
         br_token filter = state->prim.filter;
         /*
          * Sharp sampling: unfiltered textures are sampled with hardware bilinear, but the shader
@@ -403,11 +402,8 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
          * 1 - reflect: opaque draws write theirs, blended ones leave it (their output alpha only blends the glow),
          * unless they are themselves mirroring (translucent water), when they write it outright
          */
-        fade = hVideo->distanceFade != NULL ? hVideo->distanceFade() : 0.0f;
-        keep_alpha = hVideo->post.active && hVideo->post.glowTex != 0 && !(blending_on && reflect > 0.0f && fade <= 0.0f);
-        glUniform1f(hVideo->brenderProgram.uniforms.surface_reflect,
-                    fade > 0.0f || (blending_on && reflect <= 0.0f) ? -1.0f : reflect);
-        glUniform1f(hVideo->brenderProgram.uniforms.distance_fade, fade);
+        keep_alpha = hVideo->post.active && hVideo->post.glowTex != 0 && !(blending_on && reflect > 0.0f);
+        glUniform1f(hVideo->brenderProgram.uniforms.surface_reflect, blending_on && reflect <= 0.0f ? -1.0f : reflect);
         glUniform1i(hVideo->brenderProgram.uniforms.surface_sprite, hVideo->post.drawSprite != 0);
         /* (texture_reflect -0.5: a soft edged texture, see brender.frag.glsl) */
         glUniform1i(hVideo->brenderProgram.uniforms.surface_soft, reflect < -0.45f && reflect > -0.55f);
@@ -434,18 +430,11 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
                 memcpy(hVideo->sceneSurfaceUploaded, surface, sizeof(surface));
             }
         }
-        glUniform1i(hVideo->brenderProgram.uniforms.alpha_to_coverage, hVideo->sampleBuffers != 0 && (blending_on || fade <= 0.0f));
+        glUniform1i(hVideo->brenderProgram.uniforms.alpha_to_coverage, hVideo->sampleBuffers != 0);
         if (blending_on) {
             glEnable(GL_BLEND);
             model->alpha = state->prim.alpha_val / 255.0f;
             apply_blend_mode(state, keep_alpha);
-            glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
-        } else if (fade > 0.0f) {
-            /* Opaque, fading out with distance: output alpha is the fade, so blend instead of using it as
-             * colour-key coverage (cut-outs are then discarded, per sample when supersampling) */
-            glEnable(GL_BLEND);
-            glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, keep_alpha ? GL_ZERO : GL_ONE, keep_alpha ? GL_ONE : GL_ZERO);
-            model->alpha = 1.0f;
             glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
         } else {
             glDisable(GL_BLEND);

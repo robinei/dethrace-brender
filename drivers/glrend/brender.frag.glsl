@@ -184,7 +184,7 @@ float blobShadow(vec3 p, vec3 n) {
 // surface_up.w) to break up tiled textures
 uniform vec4 surface_sun;
 uniform vec4 surface_up;  // the world's up in view space
-uniform vec4 surface_haze[2]; // haze colour, most of it; the distance most of it is reached by, relief strength, night haze strength
+uniform vec4 surface_haze[2]; // haze colour, most of it; the distance most of it is reached by, relief strength, night (the haze replaces the darkness)
 
 float hash3(vec3 p) {
     p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
@@ -336,8 +336,6 @@ vec3 spotHaze(vec3 p) {
 }
 // Fog by distance from the eye, from fog_min to fully fogged at fog_max
 uniform bool fog_distance;
-// Above 0: fade out (alpha) from this fraction of yon_z to yon_z, by distance from the eye
-uniform float distance_fade;
 uniform bool sharp_filter;
 
 vec3 adjustBrightness(in vec3 colour, in float brightness)
@@ -431,30 +429,35 @@ void processClipPlanes() {
     }
 }
 
+// Haze, fog and darkness alike: the view takes on `colour` with distance (from the eye, rather than depth: it
+// does not change as the view turns), from `start` on, easing in over `range` (k: how early) up to `most`, or
+// all of it by the end of the range when `full`. In the dark lights shine through it. Returns how much
+float atmosphere(vec3 colour, float most, float start, float range, float k, bool full, bool dark) {
+    float t = max(length(position.xyz) - start, 0.0) / max(range, 0.0001);
+    float f = 1.0 - exp(-k * t);
+    if (full) {
+        f = min(f / (1.0 - exp(-k)), 1.0);
+    }
+    f *= most;
+    if (dark) {
+        // headlights reach into it
+        vec3 l = spotLight + flashLight;
+        f *= 1.0 - clamp(max(l.r, max(l.g, l.b)), 0.0, 1.0);
+    }
+    fragColour.rgb = mix(fragColour.rgb, colour, f);
+    return f;
+}
+
 // Applies the fog, returns its strength
 float doDistanceFog() {
     if (fog_enabled && fog_distance) {
-        // distance rather than depth: the fog does not change as the view turns, and fully fogs geometry
-        // before the yon plane clips it, also at the sides of a wide view
-        float d = length(position.xyz);
-        float t = clamp((d - fog_min) / max(fog_max - fog_min, 0.0001), 0.0, 1.0);
-        // dense early like the original (about half at a quarter of the way), then easing into full fog
-        float f = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
-        vec3 colour = fog_colour;
         if (fog_colour == vec3(0.0) && surface_haze[1].z > 0.0) {
-            // night haze instead of darkness: easing in to its strength, in the sky's colour, and only at the far
-            // edge all of it (what is beyond the draw distance is not there)
-            f = surface_haze[1].z * (1.0 - exp(-3.0 * t)) / (1.0 - exp(-3.0));
-            f = mix(f, 1.0, smoothstep(0.8, 1.0, t));
-            colour = surface_haze[0].rgb;
+            // the night haze instead of the darkness (see main)
+            return 0.0;
         }
-        if (fog_colour == vec3(0.0)) {
-            // headlights reach into the darkness
-            vec3 l = spotLight + flashLight;
-            f *= 1.0 - clamp(max(l.r, max(l.g, l.b)), 0.0, 1.0);
-        }
-        fragColour.rgb = mix(fragColour.rgb, colour * scene_brightness, f);
-        return f;
+        // dense early like the original (about half at a quarter of the way), and all fog by the draw distance,
+        // so nothing pops in at the far edge
+        return atmosphere(fog_colour * scene_brightness, 1.0, fog_min, fog_max - fog_min, 3.0, true, fog_colour == vec3(0.0));
     }
     if (fog_enabled) {
 
@@ -598,9 +601,10 @@ void main() {
     }
 
     if (surface_haze[0].w > 0.0) {
-        // aerial perspective: everything takes on a little of the haze (sky) colour with distance, sharp
-        float d = length(position.xyz);
-        fragColour.rgb = mix(fragColour.rgb, surface_haze[0].rgb, surface_haze[0].w * (1.0 - exp(-2.0 * d / max(surface_haze[1].x, 1.0))));
+        // aerial perspective: everything takes on a little of the haze (sky) colour with distance, sharp. At
+        // night (instead of the darkness) in the night's light
+        bool night = surface_haze[1].z > 0.0;
+        atmosphere(surface_haze[0].rgb * (night ? scene_brightness : 1.0), surface_haze[0].w, 0.0, surface_haze[1].x, 2.0, false, night);
     }
 
     float fog = doDistanceFog();
@@ -608,10 +612,6 @@ void main() {
         fragColour.rgb += spotHaze(position.xyz);
     }
 
-    if (distance_fade > 0.0) {
-        float d = length(position.xyz);
-        fragColour.a *= 1.0 - smoothstep(distance_fade * yon_z, yon_z, d);
-    }
     if (soft_distance > 0.0) {
         // the solid scene's distance here, from its depth by the projection (as the depth was made)
         float ndc = 2.0 * texelFetch(soft_depth, ivec2(gl_FragCoord.xy), 0).r - 1.0;
