@@ -37,6 +37,9 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap *screen, const br_gl_post_pa
 /* While post-processing: take the depth drawn so far for the ambient occlusion, so what is drawn after it
  * (sprites, smoke, sparks) neither casts nor receives it. Without it, the final depth is used */
 void BR_PUBLIC_ENTRY BrGLPostProcessDepthSnapshot(br_pixelmap *screen);
+/* Draw into a second overlay layer of the (locked) back screen, which is drawn moved by the overlay regions'
+ * shifts (eg. the HUD elements of a widescreen window), or back into the first */
+void BR_PUBLIC_ENTRY BrGLOverlaySideLayer(br_pixelmap *pm, br_boolean on);
 
 #endif /* _NO_PROTOTYPES */
 

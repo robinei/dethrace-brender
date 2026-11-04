@@ -118,6 +118,13 @@ typedef struct br_device_pixelmap {
             int possiblyDirty;
             int locked;
 
+            // A second such layer (see BrGLOverlaySideLayer): drawn after the first, with the overlay regions'
+            // shifts, for what is moved (eg. HUD elements to the edges of a widescreen window)
+            void *sideLockedPixels;
+            GLuint sideTexture;
+            int sideActive;
+            int sideDirty;
+
         } asBack;
         struct {
             struct br_device_pixelmap* backbuffer;
@@ -128,7 +135,7 @@ typedef struct br_device_pixelmap {
     struct br_device_clut* clut;
 } br_device_pixelmap;
 
-void RenderFullScreenTextureToFrameBuffer(br_device_pixelmap* self, GLuint textureId, GLuint fb, int flipVertically, int discardPurplePixels);
+void RenderFullScreenTextureToFrameBuffer(br_device_pixelmap* self, GLuint textureId, GLuint fb, int flipVertically, int discardPurplePixels, int moved);
 
 #endif
 

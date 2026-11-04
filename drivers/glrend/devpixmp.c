@@ -499,7 +499,7 @@ br_error BR_CMETHOD_DECL(br_device_pixelmap_gl, flush)(br_device_pixelmap* self)
     GLenum gl_format, gl_type;
     GLsizeiptr gl_elem_bytes;
 
-    if (!self->asBack.possiblyDirty) {
+    if (!self->asBack.possiblyDirty && !self->asBack.sideDirty) {
         return BRE_OK;
     }
 
@@ -511,24 +511,71 @@ br_error BR_CMETHOD_DECL(br_device_pixelmap_gl, flush)(br_device_pixelmap* self)
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, self->pm_width, self->pm_height, gl_format, gl_type, self->asBack.lockedPixels);
 
     // render locked pixels to framebuffer texture, ignoring purple pixels
-    RenderFullScreenTextureToFrameBuffer(self->screen, self->asBack.overlayTexture, 0, 0, 1);
+    RenderFullScreenTextureToFrameBuffer(self->screen, self->asBack.overlayTexture, 0, 0, 1, 0);
+
+    // the moved layer over it
+    if (self->asBack.sideDirty && self->asBack.sideLockedPixels != NULL) {
+        glBindTexture(GL_TEXTURE_2D, self->asBack.sideTexture);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, self->pm_width, self->pm_height, gl_format, gl_type, self->asBack.sideLockedPixels);
+        RenderFullScreenTextureToFrameBuffer(self->screen, self->asBack.sideTexture, 0, 0, 1, 1);
+    }
 
     // reset pixels back to gamedev purple
 
     switch (self->pm_type) {
     case BR_PMT_RGB_565:
         _MemFill_A(self->asBack.lockedPixels, 0, self->pm_width * self->pm_height, 2, BR_COLOUR_565(31, 0, 31));
+        if (self->asBack.sideDirty && self->asBack.sideLockedPixels != NULL) {
+            _MemFill_A(self->asBack.sideLockedPixels, 0, self->pm_width * self->pm_height, 2, BR_COLOUR_565(31, 0, 31));
+        }
         break;
     default:
         ASSERT(0);
     }
 
     self->asBack.possiblyDirty = 0;
+    self->asBack.sideDirty = self->asBack.sideActive;
 
     glBindTexture(GL_TEXTURE_2D, 0);
 
     GL_CHECK_ERROR();
     return BRE_OK;
+}
+
+/*
+ * Draw into the second (moved) overlay layer, or back into the first. Only for a back screen whose pixels are
+ * the locked overlay (RGB 565), and only while it is locked or unlocked between drawing (the choice is kept
+ * across locks)
+ */
+void BR_PUBLIC_ENTRY BrGLOverlaySideLayer(br_pixelmap* pm, br_boolean on) {
+    br_device_pixelmap* self = (br_device_pixelmap*)pm;
+    GLint gl_internal_format;
+    GLenum gl_format, gl_type;
+    GLsizeiptr gl_elem_bytes;
+
+    if (self == NULL || self->use_type != BRT_OFFSCREEN || self->pm_type != BR_PMT_RGB_565) {
+        return;
+    }
+    if (on && self->asBack.sideLockedPixels == NULL) {
+        if (VIDEOI_BrPixelmapGetTypeDetails(self->pm_type, &gl_internal_format, &gl_format, &gl_type, &gl_elem_bytes, NULL) != BRE_OK) {
+            return;
+        }
+        glGenTextures(1, &self->asBack.sideTexture);
+        glBindTexture(GL_TEXTURE_2D, self->asBack.sideTexture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexImage2D(GL_TEXTURE_2D, 0, gl_internal_format, self->pm_width, self->pm_height, 0, gl_format, gl_type, NULL);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        self->asBack.sideLockedPixels = BrMemAllocate(self->pm_height * self->pm_row_bytes, BR_MEMORY_PIXELS);
+        _MemFill_A(self->asBack.sideLockedPixels, 0, self->pm_width * self->pm_height, 2, BR_COLOUR_565(31, 0, 31));
+    }
+    self->asBack.sideActive = on && self->asBack.sideLockedPixels != NULL;
+    if (self->asBack.sideActive) {
+        self->asBack.sideDirty = 1;
+    }
+    if (self->asBack.locked && self->asBack.lockedPixels != NULL) {
+        self->pm_pixels = self->asBack.sideActive ? self->asBack.sideLockedPixels : self->asBack.lockedPixels;
+    }
 }
 
 br_error BR_CMETHOD_DECL(br_device_pixelmap_gl, directLock)(br_device_pixelmap* self, br_boolean block) {
@@ -549,7 +596,7 @@ br_error BR_CMETHOD_DECL(br_device_pixelmap_gl, directLock)(br_device_pixelmap* 
         self->asBack.lockedPixels = BrMemAllocate(self->pm_height * self->pm_row_bytes, BR_MEMORY_PIXELS);
     }
 
-    self->pm_pixels = self->asBack.lockedPixels;
+    self->pm_pixels = self->asBack.sideActive && self->asBack.sideLockedPixels != NULL ? self->asBack.sideLockedPixels : self->asBack.lockedPixels;
 
     self->asBack.locked = 1;
     self->asBack.possiblyDirty = 1;

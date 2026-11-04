@@ -19,8 +19,8 @@ uniform int uSharp;
 // The quad spans uLayerWidth overlay pixels, starting uLayerMargin pixels left of the overlay (0 = just the overlay)
 uniform float uLayerWidth;
 uniform float uLayerMargin;
-// Overlay regions (left, top, right, bottom in overlay pixels) drawn moved right by uRegionShifts pixels. Regions
-// with no shift stay where they are and come first (messages drawn over the moved elements' places)
+// The moved layer (with uRegionCount > 0): its regions (left, top, right, bottom in overlay pixels) drawn moved
+// right by uRegionShifts pixels; anything else in it where it is
 #define MAX_REGIONS 64
 uniform int uRegionCount;
 uniform vec4 uRegions[MAX_REGIONS];
@@ -79,21 +79,10 @@ void main()
     ivec2 size = textureSize(uSampler, 0);
 
     if (uRegionCount > 0) {
-        // Which overlay pixel this is: a message staying put (when it has something here), a moved element,
-        // or the overlay where nothing moved away
+        // Which layer pixel this is: one of a moved region's, or the layer where nothing moved away
         vec2 p = vec2(st.x * uLayerWidth - uLayerMargin, st.y * float(size.y));
         vec2 band = max(fwidth(p), vec2(1e-5));
         ivec2 whole_hi = size - 1;
-        for (int i = 0; i < uRegionCount; i++) {
-            if (uRegionShifts[i] == 0.0 && inRect(p, uRegions[i])) {
-                vec4 c = sampleOverlay(p, band, ivec2(0), whole_hi, size, false);
-                if (c.a > 0.0) {
-                    mainColour = c;
-                    return;
-                }
-                break;
-            }
-        }
         for (int i = 0; i < uRegionCount; i++) {
             vec2 moved = p - vec2(uRegionShifts[i], 0.0);
             if (uRegionShifts[i] != 0.0 && inRect(moved, uRegions[i])) {

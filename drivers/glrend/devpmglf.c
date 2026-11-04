@@ -124,7 +124,7 @@ static void SetupFullScreenRectGeometry(br_device_pixelmap* self) {
     GL_CHECK_ERROR();
 }
 
-void RenderFullScreenTextureToFrameBuffer(br_device_pixelmap* self, GLuint textureId, GLuint fb, int flipVertically, int discardPurplePixels) {
+void RenderFullScreenTextureToFrameBuffer(br_device_pixelmap* self, GLuint textureId, GLuint fb, int flipVertically, int discardPurplePixels, int moved) {
 
     int x, y, i, region_count;
     float width_m, height_m, margin;
@@ -135,7 +135,8 @@ void RenderFullScreenTextureToFrameBuffer(br_device_pixelmap* self, GLuint textu
     DevicePixelmapGLGetViewport(self, &x, &y, &width_m, &height_m);
 
     region_count = 0;
-    if (discardPurplePixels && self->asFront.callbacks.overlay_regions != NULL) {
+    /* the overlay regions' shifts apply to the moved layer (see BrGLOverlaySideLayer) */
+    if (moved && discardPurplePixels && self->asFront.callbacks.overlay_regions != NULL) {
         region_count = self->asFront.callbacks.overlay_regions(&regions);
         if (region_count > BR_GL_MAX_OVERLAY_REGIONS) {
             region_count = BR_GL_MAX_OVERLAY_REGIONS;
