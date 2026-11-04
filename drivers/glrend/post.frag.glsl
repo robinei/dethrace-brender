@@ -289,6 +289,11 @@ vec3 wetGround(vec2 p, vec2 size) {
     vec2 w = (uToWorld[3] + P.x * uToWorld[0] + P.y * uToWorld[1] + P.z * uToWorld[2]).xz;
     float wet = smoothstep(0.4, 0.75, valueNoise2(w * 1.6) * 0.75 + valueNoise2(w * 7.0) * 0.25);
     float rough = 1.0 - wet;
+    // the water lies over ground that isn't quite flat, its surface smoothed by the surface tension: the
+    // reflection gently warped, in long smooth swells anchored to the ground (still), less far off
+    vec2 swell = vec2(valueNoise2(w * 3.1 + 11.0) + 0.5 * valueNoise2(w * 7.3 + 3.0),
+                      valueNoise2(w * 2.7 + 29.0) + 0.5 * valueNoise2(w * 6.9 + 17.0)) - 0.75;
+    hit += swell * vec2(10.0, 16.0) * uScale / (1.0 + 0.15 * -P.z);
     // the surface's grain jitters where the reflection is looked up, only where it is just damp (the puddles
     // reflect cleanly)
     vec2 grain = vec2(hash12(p), hash12(p + 17.3)) - 0.5;
