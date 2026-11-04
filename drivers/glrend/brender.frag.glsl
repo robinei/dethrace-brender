@@ -571,7 +571,9 @@ void main() {
             spotLight = spotLighting(position.xyz, normalize(normal.xyz));
         }
         // lit up to the normal (daylight) brightness, not beyond, so close bright surfaces don't blow out
-        vec3 lit = fragColour.rgb * min(scene_brightness + spotLight, vec3(1.0));
+        // (smoke, dust and spray, the soft edged particles, catch the night's light around them: half as dark)
+        float brightness = surface_soft ? mix(scene_brightness, 1.0, 0.5) : scene_brightness;
+        vec3 lit = fragColour.rgb * min(brightness + spotLight, vec3(1.0));
         flashColour = fragColour.rgb * flashLight;
         lit += flashColour;
         fragColour.rgb = mix(lit, textureColour.rgb, clamp(glowMask, 0.0, 1.0) * (1.0 - scene_brightness));
