@@ -336,6 +336,10 @@ vec3 wetGround(vec2 p, vec2 size) {
     // wetness: large patches (puddles a few metres across), with finer variation (the world unit is about 7m)
     vec2 w = (uToWorld[3] + P.x * uToWorld[0] + P.y * uToWorld[1] + P.z * uToWorld[2]).xz;
     float wet = smoothstep(0.4, 0.75, valueNoise2(w * 1.6) * 0.75 + valueNoise2(w * 7.0) * 0.25);
+    // grass (where green clearly dominates) holds no water to mirror: only a faint damp sheen, no puddles
+    vec3 base = texelFetch(uColour, ivec2(p), 0).rgb;
+    float grass = smoothstep(1.08, 1.3, base.g / max(max(base.r, base.b), 0.004));
+    wet *= 1.0 - grass;
     float rough = 1.0 - wet;
     float grazing = 1.0 - max(dot(-v, uUp), 0.0);
     // in the rain, the drops' rings ripple it (near by: further off they are too fine to see); their crests catch
@@ -343,8 +347,8 @@ vec3 wetGround(vec2 p, vec2 size) {
     vec2 rings = vec2(0.0);
     vec3 crests = vec3(0.0);
     float near = 1.0 - smoothstep(1.5, 3.0, -P.z);
-    if (uRain > 0.0 && near > 0.0) {
-        rings = rainRings(w) * near * min(uRain, 1.5);
+    if (uRain > 0.0 && near > 0.0 && grass < 1.0) {
+        rings = rainRings(w) * near * min(uRain, 1.5) * (1.0 - grass);
         crests = vec3(0.8, 0.85, 0.9) * (0.06 * length(rings) * (0.4 + 0.6 * grazing) * flat_ground * uWet * (0.4 + 0.6 * wet));
     }
     bool to_sky;
@@ -376,7 +380,7 @@ vec3 wetGround(vec2 p, vec2 size) {
     }
     sum /= 5.0;
     float fresnel = 0.15 + 0.85 * grazing * grazing * grazing;
-    return crests + sum * fresnel * flat_ground * edgeFade(hit) * uWet * (0.3 + 0.7 * wet);
+    return crests + sum * fresnel * flat_ground * edgeFade(hit) * uWet * (0.3 + 0.7 * wet) * (1.0 - 0.85 * grass);
 }
 
 // the ripples on water at view space point P: how they shift its mirror image, in window pixels
