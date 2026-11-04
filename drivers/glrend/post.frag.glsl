@@ -235,7 +235,7 @@ float hash12(vec2 q) {
     return fract((q3.x + q3.y) * q3.z);
 }
 
-float noise2(vec2 x) {
+float valueNoise2(vec2 x) {
     vec2 i = floor(x);
     vec2 f = fract(x);
     f = f * f * (3.0 - 2.0 * f);
@@ -264,7 +264,7 @@ vec3 wetGround(vec2 p, vec2 size) {
     }
     // wetness: large patches (puddles a few metres across), with finer variation (the world unit is about 7m)
     vec2 w = (uToWorld[3] + P.x * uToWorld[0] + P.y * uToWorld[1] + P.z * uToWorld[2]).xz;
-    float wet = smoothstep(0.4, 0.75, noise2(w * 1.6) * 0.75 + noise2(w * 7.0) * 0.25);
+    float wet = smoothstep(0.4, 0.75, valueNoise2(w * 1.6) * 0.75 + valueNoise2(w * 7.0) * 0.25);
     float rough = 1.0 - wet;
     // the surface's grain jitters where the reflection is looked up, more where it is only damp
     vec2 grain = vec2(hash12(p), hash12(p + 17.3)) - 0.5;
