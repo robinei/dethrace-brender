@@ -15,6 +15,8 @@ uniform int uStage;
 // lamps (street lamps, neon, signs) the air glows around at night: view space position and the reach of the glow,
 // colour and strength
 uniform vec4 uLamps[48];
+// the rain's amount: rings spread where the drops hit the wet ground
+uniform float uRain;
 uniform int uLampCount;
 uniform sampler2D uDepth;
 uniform sampler2D uGlow;
@@ -293,6 +295,34 @@ float valueNoise2(vec2 x) {
 // the viewer as on wet asphalt, and stronger at grazing angles. Not a mirror: how wet it is varies over the
 // ground (in the world, so it stays put), puddles reflecting more sharply and strongly than the damp rest, and
 // the rough surface breaks the reflection up
+// Rings spreading where raindrops hit the wet ground, at world position w (world units, about 7m): how they tilt
+// the water's surface. Drops at random places and times in a grid of cells (two, offset), each ring growing and
+// fading within the neighbouring cells
+vec2 rainRings(vec2 w) {
+    const float CELL = 0.05; // about 35cm
+    const float PERIOD = 0.8;
+    vec2 g = vec2(0.0);
+    for (int layer = 0; layer < 2; layer++) {
+        vec2 cw = w / CELL + float(layer) * vec2(0.5, 0.37);
+        vec2 base = floor(cw);
+        for (int j = -1; j <= 1; j++) {
+            for (int i = -1; i <= 1; i++) {
+                vec2 cell = base + vec2(float(i), float(j));
+                float h = hash12(cell + float(layer) * 41.0);
+                vec2 centre = cell + 0.15 + 0.7 * vec2(h, hash12(cell + 7.7 + float(layer) * 13.0));
+                float t = fract(uTime / PERIOD + h * 7.31);
+                vec2 d = cw - centre;
+                float dist = length(d);
+                float x = dist - t * 0.9;
+                // a thin ring (one crest and its trough), fading as it spreads
+                float wave = sin(x * 34.0) * exp(-x * x * 180.0) * (1.0 - t) * (1.0 - t);
+                g += d / max(dist, 0.001) * wave;
+            }
+        }
+    }
+    return g;
+}
+
 vec3 wetGround(vec2 p, vec2 size) {
     if (texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
         return vec3(0.0);
@@ -303,21 +333,32 @@ vec3 wetGround(vec2 p, vec2 size) {
         return vec3(0.0);
     }
     vec3 v = normalize(P);
-    bool to_sky;
-    vec2 last;
-    vec2 hit = traceReflection(P, uUp, reflect(v, uUp), p, 1.0, to_sky, last);
-    if (hit.x < 0.0) {
-        return vec3(0.0);
-    }
     // wetness: large patches (puddles a few metres across), with finer variation (the world unit is about 7m)
     vec2 w = (uToWorld[3] + P.x * uToWorld[0] + P.y * uToWorld[1] + P.z * uToWorld[2]).xz;
     float wet = smoothstep(0.4, 0.75, valueNoise2(w * 1.6) * 0.75 + valueNoise2(w * 7.0) * 0.25);
     float rough = 1.0 - wet;
+    float grazing = 1.0 - max(dot(-v, uUp), 0.0);
+    // in the rain, the drops' rings ripple it (near by: further off they are too fine to see); their crests catch
+    // a little light whatever is reflected
+    vec2 rings = vec2(0.0);
+    vec3 crests = vec3(0.0);
+    float near = 1.0 - smoothstep(1.5, 3.0, -P.z);
+    if (uRain > 0.0 && near > 0.0) {
+        rings = rainRings(w) * near * min(uRain, 1.5);
+        crests = vec3(0.8, 0.85, 0.9) * (0.06 * length(rings) * (0.4 + 0.6 * grazing) * flat_ground * uWet * (0.4 + 0.6 * wet));
+    }
+    bool to_sky;
+    vec2 last;
+    vec2 hit = traceReflection(P, uUp, reflect(v, uUp), p, 1.0, to_sky, last);
+    if (hit.x < 0.0) {
+        return crests;
+    }
     // the water lies over ground that isn't quite flat, its surface smoothed by the surface tension: the
     // reflection gently warped, in long smooth swells anchored to the ground (still), less far off
     vec2 swell = vec2(valueNoise2(w * 3.1 + 11.0) + 0.5 * valueNoise2(w * 7.3 + 3.0),
                       valueNoise2(w * 2.7 + 29.0) + 0.5 * valueNoise2(w * 6.9 + 17.0)) - 0.75;
     hit += swell * vec2(10.0, 16.0) * uScale / (1.0 + 0.15 * -P.z);
+    hit += rings * vec2(5.0, 8.0) * uScale / (1.0 + 0.3 * -P.z);
     // the surface's grain jitters where the reflection is looked up, only where it is just damp (the puddles
     // reflect cleanly)
     vec2 grain = vec2(hash12(p), hash12(p + 17.3)) - 0.5;
@@ -334,9 +375,8 @@ vec3 wetGround(vec2 p, vec2 size) {
         sum += textureLod(uGlow, (hit + vec2(side * spread, float(k) * stretch)) / size, lod).rgb * weight;
     }
     sum /= 5.0;
-    float grazing = 1.0 - max(dot(-v, uUp), 0.0);
     float fresnel = 0.15 + 0.85 * grazing * grazing * grazing;
-    return sum * fresnel * flat_ground * edgeFade(hit) * uWet * (0.3 + 0.7 * wet);
+    return crests + sum * fresnel * flat_ground * edgeFade(hit) * uWet * (0.3 + 0.7 * wet);
 }
 
 // the ripples on water at view space point P: how they shift its mirror image, in window pixels
