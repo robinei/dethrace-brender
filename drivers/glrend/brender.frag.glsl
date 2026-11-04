@@ -248,9 +248,14 @@ vec3 carWear(vec3 c, vec3 model_pos) {
     c = mix(c, dirty, grime * min(w, 1.0));
     // scratches: thin streaks along a slanting direction, in short pieces
     vec3 q = model_pos * 40.0;
-    float line = abs(fract(q.x * 0.8 + q.y * 0.35 + q.z * 0.6 + valueNoise(q * 0.08) * 3.0) - 0.5);
+    float coord = q.x * 0.8 + q.y * 0.35 + q.z * 0.6 + valueNoise(q * 0.08) * 3.0;
+    float line = abs(fract(coord) - 0.5);
     float piece = smoothstep(1.0 - 0.3 * min(w, 2.0), 1.05 - 0.3 * min(w, 2.0), valueNoise(q * 0.12 + 3.0));
-    float scratch = (1.0 - smoothstep(0.0, 0.07, line)) * piece;
+    // anti-aliased: edges a pixel soft, and where the lines are closer than a few pixels (further off) they fade
+    // into their average (they aliased into a dithering pattern)
+    float fw = fwidth(coord);
+    float sharp = 1.0 - smoothstep(0.07 - fw, 0.07 + fw, line);
+    float scratch = mix(sharp, 0.14, smoothstep(0.1, 0.35, fw)) * piece;
     return mix(c, vec3(0.62, 0.6, 0.57), scratch * 0.55 * min(w, 1.0));
 }
 
