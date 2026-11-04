@@ -97,6 +97,10 @@ uniform float glow_intensity;
 // How much this surface mirrors its surroundings (ice), written to the glow attachment's alpha as 1 - it for
 // the post-processing; below 0 when blending (the alpha then blends the glow, and the mask is left alone)
 uniform float surface_reflect;
+// Soft particles: the depth of the solid scene (drawn before the smoke), and the distance in front of it over
+// which a blended draw fades out; 0 for off
+uniform sampler2D soft_depth;
+uniform float soft_distance;
 // Night: the scene is darkened to scene_brightness, except for light source texels, and lit by lights (car
 // headlights, fires) in view space: position + range, direction (zero for a point light) + strength,
 // colour + haze
@@ -497,6 +501,12 @@ void main() {
     if (distance_fade > 0.0) {
         float d = length(position.xyz);
         fragColour.a *= 1.0 - smoothstep(distance_fade * yon_z, yon_z, d);
+    }
+    if (soft_distance > 0.0) {
+        // the solid scene's distance here, from its depth by the projection (as the depth was made)
+        float ndc = 2.0 * texelFetch(soft_depth, ivec2(gl_FragCoord.xy), 0).r - 1.0;
+        float scene = projection[3][2] / (ndc + projection[2][2]);
+        fragColour.a *= smoothstep(0.0, 1.0, clamp((scene + position.z) / soft_distance, 0.0, 1.0));
     }
 
     // Lights glow in their own (unlit) colour. Fog hides them; darkness only dims them a little, so lights

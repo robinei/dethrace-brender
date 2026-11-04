@@ -124,6 +124,7 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
     glBindBufferBase(GL_UNIFORM_BUFFER, hVideo->brenderProgram.blockBindingModel, hVideo->brenderProgram.uboModel);
     glUniform1i(hVideo->brenderProgram.uniforms.main_texture, hVideo->brenderProgram.mainTextureBinding);
     glUniform1i(hVideo->brenderProgram.uniforms.glow_texture, 1);
+    glUniform1i(hVideo->brenderProgram.uniforms.soft_depth, 2);
     {
         float brightness = 1.0f;
         const float* lights = NULL;

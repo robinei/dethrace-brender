@@ -229,6 +229,7 @@ br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap* screen, br_boolean gl
     }
     hVideo->post.viewArea = 0;
     hVideo->post.depthSnapshot = 0;
+    hVideo->post.softDistance = 0.0f;
     hVideo->post.active = 1;
     GL_CHECK_ERROR();
     return BRE_OK;
@@ -417,6 +418,15 @@ void BR_PUBLIC_ENTRY BrGLPostProcessDepthSnapshot(br_pixelmap* screen) {
     }
     hVideo->post.depthSnapshot = 1;
     GL_CHECK_ERROR();
+}
+
+void BR_PUBLIC_ENTRY BrGLPostProcessSoftParticles(br_pixelmap* screen, float distance) {
+    br_device_pixelmap* self = (br_device_pixelmap*)screen;
+
+    if (self == NULL || self->screen != self) {
+        return;
+    }
+    self->asFront.video.post.softDistance = distance;
 }
 
 void PostProcessRecordScene(HVIDEO hVideo, int x, int y, int w, int h, const br_matrix4* view_to_screen, br_token hint,

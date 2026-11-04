@@ -217,6 +217,10 @@ typedef struct state_stack {
     state_hidden hidden;
 
     br_uint_32 valid;
+
+    /* soft particles: the post-processing's soft distance when the model was rendered (blended models are
+     * deferred to the end of the scene, so it is kept with them), see BrGLPostProcessSoftParticles */
+    float soft_distance;
 } state_stack;
 
 typedef struct {

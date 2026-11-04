@@ -66,6 +66,8 @@ typedef struct _VIDEO {
             GLint glow_texture;      /* sampler2D */
             GLint glow_intensity;    /* float */
             GLint surface_reflect;   /* float */
+            GLint soft_depth;        /* sampler2D */
+            GLint soft_distance;     /* float */
             GLint scene_brightness;  /* float */
             GLint num_spots;         /* int */
             GLint spots;             /* vec4[3 * MAX] */
@@ -96,6 +98,8 @@ typedef struct _VIDEO {
         GLuint aoFbo[2], aoTex[2]; /* ambient occlusion, half resolution (and a target for its blur) */
         GLuint aoDepthFbo, aoDepthTex; /* the depth snapshot the ambient occlusion uses, see BrGLPostProcessDepthSnapshot */
         int depthSnapshot;
+        float softDistance; /* soft particles: what is drawn fades out this close to the snapshot depth, 0 for off */
+        float drawSoftDistance; /* that of the models being drawn (kept in their state, see state_stack) */
         GLuint program, aoProgram;
         GLint uniforms[32], aoUniforms[8];
         /* the view: the largest perspective scene drawn while active */

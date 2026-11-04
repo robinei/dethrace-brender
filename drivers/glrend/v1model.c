@@ -398,6 +398,14 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
         glUniform1f(hVideo->brenderProgram.uniforms.surface_reflect,
                     fade > 0.0f || (blending_on && reflect <= 0.0f) ? -1.0f : reflect);
         glUniform1f(hVideo->brenderProgram.uniforms.distance_fade, fade);
+        if (hVideo->post.active && hVideo->post.depthSnapshot && hVideo->post.drawSoftDistance > 0.0f) {
+            glActiveTexture(GL_TEXTURE2);
+            glBindTexture(GL_TEXTURE_2D, hVideo->post.aoDepthTex);
+            glActiveTexture(GL_TEXTURE0);
+            glUniform1f(hVideo->brenderProgram.uniforms.soft_distance, hVideo->post.drawSoftDistance);
+        } else {
+            glUniform1f(hVideo->brenderProgram.uniforms.soft_distance, 0.0f);
+        }
         if (hVideo->sceneSurface != NULL) {
             /* it can change within a scene (off for the sky) */
             float surface[BR_GL_SCENE_SURFACE_FLOATS] = { 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
@@ -475,6 +483,8 @@ void StoredGLRenderGroup(br_geometry_stored* self, br_renderer* renderer, const 
         ASSERT(p == hVideo->brenderProgram.uboModel);
     }
 #endif
+
+    hVideo->post.drawSoftDistance = renderer->state.current->soft_distance;
 
     model.projection_brender = cache->model.p_br;
     model.projection = cache->model.p;

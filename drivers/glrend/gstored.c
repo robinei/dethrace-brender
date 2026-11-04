@@ -427,6 +427,7 @@ static br_error V1Model_RenderStored(struct br_geometry_stored* self, br_rendere
     distance_from_zero = BrVector3Length(&pos);
 
     defer = want_defer(&state->hidden);
+    state->soft_distance = renderer->pixelmap->screen->asFront.video.post.softDistance;
 
     for (int i = 0; i < self->model->ngroups; ++i) {
         struct v11group* group = self->model->groups + i;
