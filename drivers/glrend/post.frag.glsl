@@ -349,8 +349,8 @@ vec2 atLeast(vec2 v, float least) {
 }
 
 // How much the point at map coordinates m (of `level`) is in the sun's shadow, 0..1: bilinear comparisons at a
-// grid of taps over the pixel's footprint in the map (ax, ay: across the pixel, in texels; at least 2 texels, for
-// soft edges), as many along each as it spans texels (2 to 6), so far off and at grazing angles thin shadows
+// grid of taps over the pixel's footprint in the map (ax, ay: across the pixel, in texels; at least 3 texels, for
+// soft edges), one more along each than it spans texels (4 to 6), so far off and at grazing angles thin shadows
 // aren't stepped over (they flickered); each counting only what is more than `gap` (world units) nearer the sun.
 // zx, zy: how the surface's depth in the map changes across the pixel, so each tap compares with the surface's
 // own depth there (else on surfaces sloping away from the sun a wide filter shadowed them with themselves)
@@ -359,13 +359,15 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float zx, float zy, float ga
     float threshold = m.z - gap * abs(uShadowProj[level][2][2]) * 0.5 - 0.00005;
     float texels = 1.0 / uShadowTexel[level];
     int last = int(texels) - 1;
-    vec2 a = atLeast(ax, 2.0);
-    vec2 b = atLeast(ay, 2.0);
+    // (at least 3 texels: soft enough that the edges of moving shadows, the cars', glide across the texels
+    // instead of flipping them; about 7cm close up)
+    vec2 a = atLeast(ax, 3.0);
+    vec2 b = atLeast(ay, 3.0);
     // (the depth change along a and b: the footprint's, scaled as they were widened)
     float za = zx * min(length(a) / max(length(ax), 1e-6), 64.0);
     float zb = zy * min(length(b) / max(length(ay), 1e-6), 64.0);
-    int nx = int(clamp(ceil(length(a)), 2.0, 6.0));
-    int ny = int(clamp(ceil(length(b)), 2.0, 6.0));
+    int nx = int(clamp(ceil(length(a)) + 1.0, 4.0, 6.0));
+    int ny = int(clamp(ceil(length(b)) + 1.0, 4.0, 6.0));
     vec2 f = m.xy * texels - 0.5;
     float sum = 0.0;
     for (int j = 0; j < ny; j++) {
