@@ -462,6 +462,11 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
         model->fog_max = state->prim.fog_max;
     }
     apply_depth_properties(hVideo, state, states);
+    if ((states & MASK_STATE_PRIMITIVE) && reflect < -0.45f && reflect > -0.55f) {
+        /* the soft edged textures (smoke) don't write depth: the post-processing would take them for the surface
+         * there (and leave out the shadows behind them) */
+        glDepthMask(GL_FALSE);
+    }
     GL_CHECK_ERROR();
 }
 
