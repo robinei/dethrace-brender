@@ -92,6 +92,16 @@ typedef struct _VIDEO {
 
     GLint sampleBuffers; /* Non-zero if the default framebuffer is multisampled */
 
+    /* The sun's shadow map (see BrGLShadowPassBegin): the scenes drawn while active only write its depth */
+    struct {
+        int active;
+        int valid; /* drawn this frame */
+        int size;
+        GLuint fbo, tex;
+        float proj[16]; /* the projection it was drawn with (GL) */
+        int skip; /* the group being drawn doesn't cast a shadow (translucent) */
+    } shadow;
+
     /* Post-processing of a view (see post.c): rendered offscreen between BrGLPostProcessBegin/End */
     struct {
         int active;

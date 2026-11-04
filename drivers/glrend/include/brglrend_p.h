@@ -36,12 +36,18 @@ typedef struct br_gl_post_params {
     float paint;                /* glossy car paint (texture_reflect 0.25, needs glow), 0 disables */
     float weather[3];           /* snow or rain: 1 for rain (else snow), the amount (0 for none), their brightness */
     float sun[4];               /* sun shadows: the sun's direction in view space, and their strength (0 disables) */
+    float shadow_view[12];      /* world to the shadow map's camera, as a br_matrix34 (used if the map was drawn) */
     int shimmer_count;          /* heat shimmer above these points: view space position and strength, up to 8 */
     float shimmers[4 * 8];
 } br_gl_post_params;
 
 br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap *screen, br_boolean glow);
 void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap *screen, const br_gl_post_params *params);
+/* The sun's shadow map: the scenes drawn between Begin and End (with a parallel camera at the sun) only write
+ * its depth, size x size; translucent draws are left out. The post-processing then shades by it (see
+ * br_gl_post_params.shadow_view) */
+br_error BR_PUBLIC_ENTRY BrGLShadowPassBegin(br_pixelmap *screen, int size);
+void BR_PUBLIC_ENTRY BrGLShadowPassEnd(br_pixelmap *screen);
 /* While post-processing, after a depth snapshot: blended draws fade out within `distance` (view units) in front
  * of the snapshot's depth, so sprites don't show hard lines where they cut into it; 0 turns it off */
 void BR_PUBLIC_ENTRY BrGLPostProcessSoftParticles(br_pixelmap *screen, float distance);

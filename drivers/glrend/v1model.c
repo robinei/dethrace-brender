@@ -392,6 +392,8 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
             glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, maxAnisotropy);
 
         blending_on = (state->prim.flags & PRIMF_BLEND) || (state->prim.colour_map != NULL && state->prim.colour_map->blended);
+        /* translucent things (water, glass, smoke) cast no shadow */
+        hVideo->shadow.skip = blending_on;
         /*
          * The glow attachment's alpha (of a post-processed view) is a mask of the mirroring surfaces, stored as
          * 1 - reflect: opaque draws write theirs, blended ones leave it (their output alpha only blends the glow),
@@ -525,6 +527,13 @@ void StoredGLRenderGroup(br_geometry_stored* self, br_renderer* renderer, const 
     BrVector4Set(&model.clear_colour, colour_target->asBack.clearColour[0], colour_target->asBack.clearColour[1],
         colour_target->asBack.clearColour[2], colour_target->asBack.clearColour[3]);
 
+    if (hVideo->shadow.active) {
+        if (hVideo->shadow.skip) {
+            return;
+        }
+        memcpy(hVideo->shadow.proj, &cache->model.p, sizeof(hVideo->shadow.proj));
+        hVideo->shadow.valid = 1;
+    }
     glBufferData(GL_UNIFORM_BUFFER, sizeof(model), &model, GL_STATIC_DRAW);
     glDrawElements(GL_TRIANGLES, groupinfo->count, GL_UNSIGNED_SHORT, groupinfo->offset);
 

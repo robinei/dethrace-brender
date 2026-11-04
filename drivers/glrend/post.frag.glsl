@@ -1,6 +1,7 @@
 ##ifdef GL_ES
 #version 300 es
 precision highp float;
+precision highp sampler2DShadow;
 ##endif
 ##ifdef GL_CORE
 #version 140
@@ -46,8 +47,13 @@ uniform float uWater;
 uniform vec3 uToWorld[4];
 // car paint: strength of its glossy reflections
 uniform float uPaint;
-// sun shadows: the sun's direction in view space, and their strength
+// sun shadows: the sun's direction in view space, and their strength; the sun's shadow map: its projection,
+// world to its camera (rows: x, y, z, position), its texel size (0 for none this frame)
 uniform vec4 uSun;
+uniform sampler2DShadow uShadowMap;
+uniform mat4 uShadowProj;
+uniform vec3 uShadowView[4];
+uniform float uShadowTexel;
 
 out vec4 fragColour;
 
@@ -291,47 +297,43 @@ vec2 ripple(vec3 P) {
     return d * scale * vec2(1.0, 0.6);
 }
 
-// Sun shadows: whether something in the view stands between the surface at p and the sun, by marching
-// towards it through the depth (only what is in front of the march by less than a thickness counts, so not the
-// scenery far behind). The sun is high, so the shadows are short and mostly in view. Surfaces facing away
-// from the sun are left to the sun shading. 1 for lit, down to 0 in shadow
+// Sun shadows, by the sun's shadow map (drawn from the sun around the car, all of the world in it): 1 for lit,
+// down to 0 in shadow. Surfaces facing away from the sun are left to the sun shading. The lookup is filtered
+// over a few texels, for soft edges
 float sunShadow(vec2 p) {
-    if (texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
+    if (uShadowTexel <= 0.0 || texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
         return 1.0;
     }
     vec3 P = viewPosition(p);
     float dist = -P.z;
-    float fade = 1.0 - smoothstep(20.0, 30.0, dist);
-    if (fade <= 0.0) {
-        return 1.0;
-    }
     vec3 s = normalize(uSun.xyz);
     vec3 n = depthNormal(p, P);
-    if (dot(n, s) <= 0.05) {
+    float facing = dot(n, s);
+    if (facing <= 0.02) {
         return 1.0;
     }
-    float jitter = fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
-    vec3 q = P + n * (0.004 + 0.002 * dist);
-    float step_len = 0.015 + 0.006 * dist;
-    q += s * step_len * jitter;
-    for (int i = 0; i < 20; i++) {
-        q += s * step_len;
-        step_len *= 1.13;
-        if (q.z > -uNear) {
-            break;
-        }
-        vec2 w = toWindow(q);
-        if (w.x < uView.x || w.y < uView.y || w.x >= uView.x + uView.z || w.y >= uView.y + uView.w) {
-            break;
-        }
-        float zs = linearDepth(texelFetch(uDepth, ivec2(w), 0).r);
-        float behind = -q.z - zs;
-        // (a car is about 0.2 high, a lamp post thin: up to about 2m)
-        if (behind > 0.003 * zs && behind < 0.3 + 0.01 * zs) {
-            return 1.0 - fade * edgeFade(w);
+    // a little off the surface, along its normal, more at grazing angles to the sun (against shadow acne)
+    vec3 Q = P + n * (0.006 + 0.0006 * dist) * (1.0 + 2.0 * (1.0 - facing));
+    vec3 w = uToWorld[3] + Q.x * uToWorld[0] + Q.y * uToWorld[1] + Q.z * uToWorld[2];
+    vec3 lv = uShadowView[3] + w.x * uShadowView[0] + w.y * uShadowView[1] + w.z * uShadowView[2];
+    vec4 clip = uShadowProj * vec4(lv, 1.0);
+    vec3 m = clip.xyz / clip.w * 0.5 + 0.5;
+    if (m.x <= 0.0 || m.y <= 0.0 || m.x >= 1.0 || m.y >= 1.0 || m.z >= 1.0) {
+        return 1.0;
+    }
+    float lit = 0.0;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            lit += texture(uShadowMap, vec3(m.xy + vec2(float(x), float(y)) * 1.2 * uShadowTexel, m.z - 0.00005));
         }
     }
-    return 1.0;
+    lit /= 9.0;
+    // fading out towards the map's edges
+    vec2 e = min(m.xy, 1.0 - m.xy) / 0.06;
+    float fade = clamp(min(e.x, e.y), 0.0, 1.0);
+    // and as the surface turns away from the sun (where the sun shading takes over)
+    fade *= smoothstep(0.02, 0.15, facing);
+    return mix(1.0, lit, fade);
 }
 
 // Ice and water (the mirroring surfaces, masked in the glow's alpha as 1 - 1 for ice, 1 - 0.5 for water): a soft

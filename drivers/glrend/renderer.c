@@ -160,13 +160,25 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
     if (self->pixelmap->msaa_samples)
         glEnable(GL_MULTISAMPLE);
 
-
+    if (hVideo->shadow.active) {
+        /* the sun's shadow map: only its depth, pushed back a little against the shadow acne of the faces
+         * themselves */
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->shadow.fbo);
+        glDrawBuffer(GL_NONE);
+        glViewport(0, 0, hVideo->shadow.size, hVideo->shadow.size);
+        glDisable(GL_SCISSOR_TEST);
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(1.5f, 2.0f);
+    }
 
     GL_CHECK_ERROR();
     self->has_begun = 1;
 }
 
 void BR_CMETHOD_DECL(br_renderer_gl, sceneEnd)(br_renderer* self) {
+    if (self->pixelmap->screen->asFront.video.shadow.active) {
+        glDisable(GL_POLYGON_OFFSET_FILL);
+    }
     glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
