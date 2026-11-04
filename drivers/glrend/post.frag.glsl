@@ -44,6 +44,8 @@ uniform float uIce;
 // water: strength of its mirror image; view to world space (rows: the x, y and z axes, the position)
 uniform float uWater;
 uniform vec3 uToWorld[4];
+// car paint: strength of its glossy reflections
+uniform float uPaint;
 
 out vec4 fragColour;
 
@@ -146,13 +148,14 @@ vec2 toWindow(vec3 v) {
 // the sky). Behind something in front (a car) it carries on, so reflections don't stop at its outline;
 // `to_sky` tells whether, without meeting anything, it went only in front of the sky at the end (so it would
 // show the sky), rather than behind anything or out of the view in front of something else
-vec2 traceReflection(vec3 P, vec3 ray, vec2 p, out bool to_sky) {
+vec2 traceReflection(vec3 P, vec3 n, vec3 ray, vec2 p, out bool to_sky, out vec2 last) {
     bool hidden = false;
     bool over_sky = false;
     to_sky = false;
+    last = vec2(-1.0);
     float dist = -P.z;
     // a little above the surface, so it doesn't hit itself; steps growing with the distance travelled
-    vec3 q = P + uUp * (0.01 + 0.004 * dist);
+    vec3 q = P + n * (0.01 + 0.004 * dist);
     float step_len = 0.03 + 0.02 * dist;
     float jitter = fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
     q += ray * step_len * jitter;
@@ -169,6 +172,7 @@ vec2 traceReflection(vec3 P, vec3 ray, vec2 p, out bool to_sky) {
             break;
         }
         float ds = texelFetch(uDepth, ivec2(s), 0).r;
+        last = s;
         over_sky = ds >= 1.0;
         float zs = linearDepth(ds);
         float behind = -q.z - zs;
@@ -199,14 +203,20 @@ float edgeFade(vec2 hit) {
     return clamp(min(e.x, e.y), 0.0, 1.0);
 }
 
-// how flat (facing up) the surface at P is, by the normal from the neighbouring depths (the smaller steps)
-float flatGround(vec2 p, vec3 P) {
+// the surface's normal at P (window pixel p), from the neighbouring depths (the smaller steps, so not across
+// an edge), facing the viewer
+vec3 depthNormal(vec2 p, vec3 P) {
     vec3 r = viewPosition(p + vec2(1.0, 0.0)) - P;
     vec3 l = P - viewPosition(p - vec2(1.0, 0.0));
     vec3 u = viewPosition(p + vec2(0.0, 1.0)) - P;
     vec3 d = P - viewPosition(p - vec2(0.0, 1.0));
     vec3 n = normalize(cross(abs(r.z) < abs(l.z) ? r : l, abs(u.z) < abs(d.z) ? u : d));
-    return smoothstep(0.88, 0.97, abs(dot(n, uUp)));
+    return dot(n, P) > 0.0 ? -n : n;
+}
+
+// how flat (facing up) the surface at P is
+float flatGround(vec2 p, vec3 P) {
+    return smoothstep(0.88, 0.97, abs(dot(depthNormal(p, P), uUp)));
 }
 
 // Wet ground: the surfaces facing up reflect what glows (lights, neon, lit windows, car lights) as a mirror
@@ -222,7 +232,8 @@ vec3 wetGround(vec2 p, vec2 size) {
     }
     vec3 v = normalize(P);
     bool to_sky;
-    vec2 hit = traceReflection(P, reflect(v, uUp), p, to_sky);
+    vec2 last;
+    vec2 hit = traceReflection(P, uUp, reflect(v, uUp), p, to_sky, last);
     if (hit.x < 0.0) {
         return vec3(0.0);
     }
@@ -260,8 +271,10 @@ vec3 mirror(vec2 p, vec2 size, vec3 c) {
     if (amount <= 0.01 || texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
         return c;
     }
-    bool water = amount < 0.75;
-    amount = water ? amount * 2.0 * uWater : amount * uIce;
+    // (the kinds' masks blend at their edges, which then pass for another kind for a pixel)
+    bool paint = amount < 0.375;
+    bool water = !paint && amount < 0.75;
+    amount = paint ? min(amount * 4.0, 1.0) * uPaint : water ? amount * 2.0 * uWater : amount * uIce;
     if (amount <= 0.0) {
         return c;
     }
@@ -274,15 +287,25 @@ vec3 mirror(vec2 p, vec2 size, vec3 c) {
         }
     }
     vec3 v = normalize(P);
-    if (dot(v, uUp) >= 0.0) {
+    // ice and water lie flat; the car bodies go by their facets
+    vec3 n = paint ? depthNormal(p, P) : uUp;
+    if (dot(v, n) >= 0.0) {
         // seen from below (the camera under water)
         return c;
     }
-    vec3 ray = reflect(v, uUp);
+    vec3 ray = reflect(v, n);
     bool to_sky;
-    vec2 hit = traceReflection(P, ray, p, to_sky);
-    float fade;
-    if (hit.x < 0.0) {
+    vec2 last;
+    vec2 hit = traceReflection(P, n, ray, p, to_sky, last);
+    float fade = 1.0;
+    if (hit.x < 0.0 && paint) {
+        // a gloss: what is that way, roughly (where the ray left the view)
+        if (last.x < 0.0) {
+            return c;
+        }
+        hit = last;
+        fade = 0.7;
+    } else if (hit.x < 0.0) {
         if (!to_sky) {
             // it went behind something (a car on the ice), or out of the view before meeting what it would show
             return c;
@@ -303,15 +326,23 @@ vec3 mirror(vec2 p, vec2 size, vec3 c) {
             hit = rippled;
         }
     }
-    fade = edgeFade(hit);
-    // a little soft: ice isn't a perfect mirror
-    vec2 t = 3.0 * uScale / size;
+    if (fade >= 1.0) {
+        fade = edgeFade(hit);
+    }
+    // a little soft: ice isn't a perfect mirror, and paint is glossy
+    vec2 t = (paint ? 8.0 : 3.0) * uScale / size;
     vec3 r = (texture(uColour, hit / size).rgb * 2.0 + texture(uColour, hit / size + vec2(t.x, 0.0)).rgb
             + texture(uColour, hit / size - vec2(t.x, 0.0)).rgb + texture(uColour, hit / size + vec2(0.0, t.y)).rgb
             + texture(uColour, hit / size - vec2(0.0, t.y)).rgb) / 6.0;
-    float grazing = 1.0 - max(dot(-v, uUp), 0.0);
-    float fresnel = water ? 0.18 + 0.42 * grazing * grazing * grazing : 0.12 + 0.5 * grazing * grazing * grazing;
-    return mix(c, r, clamp(amount * fresnel * fade, 0.0, 1.0));
+    float grazing = 1.0 - max(dot(-v, n), 0.0);
+    float fresnel = paint ? 0.1 + 0.6 * grazing * grazing * grazing
+        : water ? 0.18 + 0.42 * grazing * grazing * grazing : 0.12 + 0.5 * grazing * grazing * grazing;
+    float f = clamp(amount * fresnel * fade, 0.0, 1.0);
+    if (paint) {
+        // a clear coat over the paint: its reflection adds to the colour underneath, which shows through
+        return c * (1.0 - 0.5 * f) + r * f;
+    }
+    return mix(c, r, f);
 }
 
 // hot air rising above fires: a wavy offset in a plume above each
@@ -360,7 +391,7 @@ void main() {
         float shade = uAOStrength <= 1.0 ? mix(1.0, ao, uAOStrength) : pow(ao, uAOStrength);
         c *= mix(1.0, shade, 1.0 - lit);
     }
-    if (uIce > 0.0 || uWater > 0.0) {
+    if (uIce > 0.0 || uWater > 0.0 || uPaint > 0.0) {
         c = mirror(p, size, c);
     }
     if (uWet > 0.0) {

@@ -33,6 +33,7 @@ typedef struct br_gl_post_params {
     float ice;                  /* mirror images on ice (see texture_reflect, needs glow), 0 disables */
     float water;                /* rippled mirror images on water (texture_reflect 0.5, needs glow), 0 disables */
     float to_world[12];         /* view to world space, as a br_matrix34 (rows: x, y and z axes, position) */
+    float paint;                /* glossy car paint (texture_reflect 0.25, needs glow), 0 disables */
     int shimmer_count;          /* heat shimmer above these points: view space position and strength, up to 8 */
     float shimmers[4 * 8];
 } br_gl_post_params;
