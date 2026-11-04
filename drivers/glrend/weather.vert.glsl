@@ -19,10 +19,13 @@ uniform float uTime;
 uniform float uScale;     // window height / 1080
 uniform float uRain;      // 1 for rain, 0 for snow
 uniform float uBox;       // the box's size
+uniform float uInner;     // the box of the layer inside this one (left out of this), 0 for none
+uniform float uMinPixels; // the least size drawn, in pixels at 1080p (smaller ones are drawn that big, fainter)
 
 out vec2 vCorner;  // -1..1 across the particle
 out float vDepth;  // its distance along the view
 out float vFade;
+out float vSub; // how much of the drawn size the particle really covers (fainter where drawn bigger)
 
 float hash(float n) {
     return fract(sin(n) * 43758.5453123);
@@ -59,6 +62,11 @@ void main() {
     float dist = length(rel);
     // (raindrops not right in front of the camera, where they would streak across the view)
     vFade = (1.0 - smoothstep(0.3 * uBox, 0.5 * uBox, dist)) * smoothstep(0.05, 0.15, -v.z) * mix(1.0, smoothstep(0.2, 0.45, -v.z), uRain);
+    // (fading in where the layer inside fades out)
+    if (uInner > 0.0) {
+        vFade *= smoothstep(0.3 * uInner, 0.5 * uInner, dist);
+    }
+    vSub = 1.0;
     if (v.z > -0.05) {
         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
         return;
@@ -76,11 +84,18 @@ void main() {
         // at most a tenth of the view's height
         float most = 0.1 * uView.w * px.y;
         along *= min(1.0, most / max(length(along), 1e-6));
-        vec2 across = normalize(vec2(-along.y, along.x) / px) * px * 0.6 * max(uScale, 0.5);
+        // about 2cm wide, at least the least size
+        float width = 0.003 * uProj.y * 0.5 * uView.w / -v.z;
+        float least = 0.6 * uMinPixels * max(uScale, 0.5);
+        vSub = min(1.0, width / least);
+        vec2 across = normalize(vec2(-along.y, along.x) / px) * px * max(width, least);
         gl_Position = vec4(a + along * (c.y * 0.5 + 0.5) + across * c.x, 0.0, 1.0);
     } else {
-        // about 3cm across, at least a pixel and a half
-        float r = max(0.005 * uProj.y * 0.5 * uView.w / -v.z, 1.5 * uScale);
+        // about 3cm across, at least the least size
+        float size = 0.005 * uProj.y * 0.5 * uView.w / -v.z;
+        float least = uMinPixels * uScale;
+        vSub = min(1.0, size / least);
+        float r = max(size, least);
         gl_Position = vec4(toNdc(v) + c * r * px, 0.0, 1.0);
     }
 }

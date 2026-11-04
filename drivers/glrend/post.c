@@ -46,10 +46,11 @@ static const char* uniform_names[U_COUNT] = {
 };
 enum {
     W_TO_WORLD, W_VIEW, W_PROJ, W_SIZE, W_TIME, W_SCALE, W_RAIN, W_BOX, W_DEPTH, W_NEAR, W_FAR, W_BRIGHTNESS, W_AMOUNT,
+    W_INNER, W_MIN_PIXELS,
     W_COUNT
 };
 static const char* weather_uniform_names[W_COUNT] = {
-    "uToWorld", "uView", "uProj", "uSize", "uTime", "uScale", "uRain", "uBox", "uDepth", "uNear", "uFar", "uBrightness", "uAmount"
+    "uToWorld", "uView", "uProj", "uSize", "uTime", "uScale", "uRain", "uBox", "uDepth", "uNear", "uFar", "uBrightness", "uAmount", "uInner", "uMinPixels"
 };
 enum {
     A_DEPTH, A_VIEW, A_PROJ, A_NEAR, A_FAR, A_RADIUS, A_AO, A_PASS,
@@ -226,8 +227,13 @@ static void draw_weather(HVIDEO hVideo, const br_gl_post_params* params, int w, 
             return;
         }
     }
-    /* about this many in a box 3 units (~20m) across, more with the amount */
-    count = (int)((rain ? 12000.0f : 12000.0f) * (params->weather[1] < 2.0f ? params->weather[1] : 2.0f));
+    /* layers in boxes around the camera, each leaving out the one inside: near (3 units, ~20m), middle (10,
+     * ~70m) and far (30, ~200m); their particles real size, so smaller further off (down to fainter specks):
+     * the near ones in flakes and drops, the further ones a dense, fine fall. More with the amount */
+    static const float boxes[3] = { 3.0f, 10.0f, 30.0f };
+    static const float counts[3] = { 12000.0f, 30000.0f, 40000.0f };
+    static const float least[3] = { 1.5f, 1.0f, 0.8f };
+    float amount = params->weather[1] < 2.0f ? params->weather[1] : 2.0f;
     glUseProgram(hVideo->post.weatherProgram);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, hVideo->post.depthTex);
@@ -240,14 +246,19 @@ static void draw_weather(HVIDEO hVideo, const br_gl_post_params* params, int w, 
     glUniform1f(u[W_TIME], params->time);
     glUniform1f(u[W_SCALE], h / 1080.0f);
     glUniform1f(u[W_RAIN], rain ? 1.0f : 0.0f);
-    glUniform1f(u[W_BOX], 3.0f);
     glUniform1f(u[W_NEAR], hVideo->post.nearZ);
     glUniform1f(u[W_FAR], hVideo->post.farZ);
     glUniform1f(u[W_BRIGHTNESS], params->weather[2]);
     glUniform1f(u[W_AMOUNT], params->weather[1]);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDrawArrays(GL_TRIANGLES, 0, count * 6);
+    for (int layer = 0; layer < 3; layer++) {
+        count = (int)(counts[layer] * amount);
+        glUniform1f(u[W_BOX], boxes[layer]);
+        glUniform1f(u[W_INNER], layer > 0 ? boxes[layer - 1] : 0.0f);
+        glUniform1f(u[W_MIN_PIXELS], least[layer]);
+        glDrawArrays(GL_TRIANGLES, 0, count * 6);
+    }
     glDisable(GL_BLEND);
 }
 
