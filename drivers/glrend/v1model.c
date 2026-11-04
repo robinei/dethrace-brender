@@ -390,11 +390,13 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
         blending_on = (state->prim.flags & PRIMF_BLEND) || (state->prim.colour_map != NULL && state->prim.colour_map->blended);
         /*
          * The glow attachment's alpha (of a post-processed view) is a mask of the mirroring surfaces, stored as
-         * 1 - reflect: opaque draws write theirs, blended ones leave it (their output alpha only blends the glow)
+         * 1 - reflect: opaque draws write theirs, blended ones leave it (their output alpha only blends the glow),
+         * unless they are themselves mirroring (translucent water), when they write it outright
          */
-        keep_alpha = hVideo->post.active && hVideo->post.glowTex != 0;
         fade = hVideo->distanceFade != NULL ? hVideo->distanceFade() : 0.0f;
-        glUniform1f(hVideo->brenderProgram.uniforms.surface_reflect, blending_on || fade > 0.0f ? -1.0f : reflect);
+        keep_alpha = hVideo->post.active && hVideo->post.glowTex != 0 && !(blending_on && reflect > 0.0f && fade <= 0.0f);
+        glUniform1f(hVideo->brenderProgram.uniforms.surface_reflect,
+                    fade > 0.0f || (blending_on && reflect <= 0.0f) ? -1.0f : reflect);
         glUniform1f(hVideo->brenderProgram.uniforms.distance_fade, fade);
         if (hVideo->sceneSurface != NULL) {
             /* it can change within a scene (off for the sky) */

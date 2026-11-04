@@ -7,7 +7,7 @@ precision highp float;
 ##endif
 
 // Post-processing of a view (see post.c), in this order: heat shimmer, depth of field, ambient occlusion,
-// ice and wet ground, speed blur, glow (bloom and light streaks), colour grading
+// ice, water and wet ground, speed blur, glow (bloom and light streaks), colour grading
 uniform sampler2D uColour;
 uniform sampler2D uDepth;
 uniform sampler2D uGlow;
@@ -41,6 +41,9 @@ uniform float uWet;
 uniform vec3 uUp;
 // ice: strength of its mirror image (of the scene), 0 for none
 uniform float uIce;
+// water: strength of its mirror image; view to world space (rows: the x, y and z axes, the position)
+uniform float uWater;
+uniform vec3 uToWorld[4];
 
 out vec4 fragColour;
 
@@ -235,15 +238,46 @@ vec3 wetGround(vec2 p, vec2 size) {
     return sum * fresnel * flat_ground * edgeFade(hit) * uWet;
 }
 
-// Ice (the mirroring surfaces, masked in the glow's alpha as 1 - how much): a soft mirror image of the scene,
-// or of the sky where the reflection only meets that; more at grazing angles
-vec3 ice(vec2 p, vec2 size, vec3 c) {
+// the ripples on water at view space point P: how they shift its mirror image, in window pixels
+vec2 ripple(vec3 P) {
+    // in the world, so they stay put as the camera moves
+    vec2 w = (uToWorld[3] + P.x * uToWorld[0] + P.y * uToWorld[1] + P.z * uToWorld[2]).xz;
+    float t = uTime;
+    vec2 d = vec2(sin(dot(w, vec2(4.1, 1.9)) + t * 1.9) + 0.6 * sin(dot(w, vec2(-2.4, 6.3)) + t * 2.6)
+                    + 0.35 * sin(dot(w, vec2(9.0, -7.0)) + t * 3.7),
+                  cos(dot(w, vec2(-1.7, 4.7)) + t * 2.2) + 0.6 * cos(dot(w, vec2(6.8, 2.8)) + t * 2.9)
+                    + 0.35 * cos(dot(w, vec2(-8.0, -10.0)) + t * 4.1));
+    // smaller further away, and squashed vertically as the surface is seen at an angle
+    float scale = 5.0 * uScale / (1.0 + 0.08 * -P.z);
+    return d * scale * vec2(1.0, 0.6);
+}
+
+// Ice and water (the mirroring surfaces, masked in the glow's alpha as 1 - 1 for ice, 1 - 0.5 for water): a soft
+// mirror image of the scene, or of the sky where the reflection only meets that; more at grazing angles, and on
+// water rippling
+vec3 mirror(vec2 p, vec2 size, vec3 c) {
     float amount = 1.0 - textureLod(uGlow, p / size, 0.0).a;
     if (amount <= 0.01 || texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
         return c;
     }
+    bool water = amount < 0.75;
+    amount = water ? amount * 2.0 * uWater : amount * uIce;
+    if (amount <= 0.0) {
+        return c;
+    }
     vec3 P = viewPosition(p);
+    if (water) {
+        // not on waterfalls and the sides of the liquid
+        amount *= flatGround(p, P);
+        if (amount <= 0.0) {
+            return c;
+        }
+    }
     vec3 v = normalize(P);
+    if (dot(v, uUp) >= 0.0) {
+        // seen from below (the camera under water)
+        return c;
+    }
     vec3 ray = reflect(v, uUp);
     bool to_sky;
     vec2 hit = traceReflection(P, ray, p, to_sky);
@@ -261,6 +295,14 @@ vec3 ice(vec2 p, vec2 size, vec3 c) {
             return c;
         }
     }
+    if (water) {
+        vec2 rippled = hit + ripple(P);
+        // not where that shows something in front of the water (it would be a copy of what is above)
+        if (rippled.x >= uView.x && rippled.y >= uView.y && rippled.x < uView.x + uView.z && rippled.y < uView.y + uView.w
+            && linearDepth(texelFetch(uDepth, ivec2(rippled), 0).r) > -P.z) {
+            hit = rippled;
+        }
+    }
     fade = edgeFade(hit);
     // a little soft: ice isn't a perfect mirror
     vec2 t = 3.0 * uScale / size;
@@ -268,8 +310,8 @@ vec3 ice(vec2 p, vec2 size, vec3 c) {
             + texture(uColour, hit / size - vec2(t.x, 0.0)).rgb + texture(uColour, hit / size + vec2(0.0, t.y)).rgb
             + texture(uColour, hit / size - vec2(0.0, t.y)).rgb) / 6.0;
     float grazing = 1.0 - max(dot(-v, uUp), 0.0);
-    float fresnel = 0.12 + 0.5 * grazing * grazing * grazing;
-    return mix(c, r, clamp(amount * fresnel * fade * uIce, 0.0, 1.0));
+    float fresnel = water ? 0.18 + 0.42 * grazing * grazing * grazing : 0.12 + 0.5 * grazing * grazing * grazing;
+    return mix(c, r, clamp(amount * fresnel * fade, 0.0, 1.0));
 }
 
 // hot air rising above fires: a wavy offset in a plume above each
@@ -318,8 +360,8 @@ void main() {
         float shade = uAOStrength <= 1.0 ? mix(1.0, ao, uAOStrength) : pow(ao, uAOStrength);
         c *= mix(1.0, shade, 1.0 - lit);
     }
-    if (uIce > 0.0) {
-        c = ice(p, size, c);
+    if (uIce > 0.0 || uWater > 0.0) {
+        c = mirror(p, size, c);
     }
     if (uWet > 0.0) {
         c += wetGround(p, size);
