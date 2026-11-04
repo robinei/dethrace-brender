@@ -34,13 +34,13 @@
 enum {
     U_COLOUR, U_DEPTH, U_GLOW, U_AO, U_VIEW, U_PROJ, U_NEAR, U_FAR, U_TIME, U_SCALE, U_START, U_END, U_MAX_RADIUS,
     U_GLOW_STRENGTH, U_FLARE_STRENGTH, U_AO_STRENGTH, U_SPEED, U_SHIMMER_COUNT, U_SHIMMERS, U_GRADE, U_AO_DEPTH,
-    U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT,
+    U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN,
     U_COUNT
 };
 static const char* uniform_names[U_COUNT] = {
     "uColour", "uDepth", "uGlow", "uAO", "uView", "uProj", "uNear", "uFar", "uTime", "uScale", "uStart", "uEnd",
     "uMaxRadius", "uGlowStrength", "uFlareStrength", "uAOStrength", "uSpeed", "uShimmerCount", "uShimmers", "uGrade", "uAODepth",
-    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint"
+    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun"
 };
 enum {
     W_TO_WORLD, W_VIEW, W_PROJ, W_SIZE, W_TIME, W_SCALE, W_RAIN, W_BOX, W_DEPTH, W_NEAR, W_FAR, W_BRIGHTNESS, W_AMOUNT,
@@ -437,6 +437,7 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glUniform1f(u[U_ICE], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->ice : 0.0f);
     glUniform1f(u[U_WATER], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->water : 0.0f);
     glUniform3fv(u[U_TO_WORLD], 4, params->to_world);
+    glUniform4fv(u[U_SUN], 1, params->sun);
     glUniform1f(u[U_PAINT], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->paint : 0.0f);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     draw_weather(hVideo, params, w, h);

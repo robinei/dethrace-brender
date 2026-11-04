@@ -46,6 +46,8 @@ uniform float uWater;
 uniform vec3 uToWorld[4];
 // car paint: strength of its glossy reflections
 uniform float uPaint;
+// sun shadows: the sun's direction in view space, and their strength
+uniform vec4 uSun;
 
 out vec4 fragColour;
 
@@ -263,6 +265,49 @@ vec2 ripple(vec3 P) {
     return d * scale * vec2(1.0, 0.6);
 }
 
+// Sun shadows: whether something in the view stands between the surface at p and the sun, by marching
+// towards it through the depth (only what is in front of the march by less than a thickness counts, so not the
+// scenery far behind). The sun is high, so the shadows are short and mostly in view. Surfaces facing away
+// from the sun are left to the sun shading. 1 for lit, down to 0 in shadow
+float sunShadow(vec2 p) {
+    if (texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
+        return 1.0;
+    }
+    vec3 P = viewPosition(p);
+    float dist = -P.z;
+    float fade = 1.0 - smoothstep(20.0, 30.0, dist);
+    if (fade <= 0.0) {
+        return 1.0;
+    }
+    vec3 s = normalize(uSun.xyz);
+    vec3 n = depthNormal(p, P);
+    if (dot(n, s) <= 0.05) {
+        return 1.0;
+    }
+    float jitter = fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+    vec3 q = P + n * (0.004 + 0.002 * dist);
+    float step_len = 0.015 + 0.006 * dist;
+    q += s * step_len * jitter;
+    for (int i = 0; i < 20; i++) {
+        q += s * step_len;
+        step_len *= 1.13;
+        if (q.z > -uNear) {
+            break;
+        }
+        vec2 w = toWindow(q);
+        if (w.x < uView.x || w.y < uView.y || w.x >= uView.x + uView.z || w.y >= uView.y + uView.w) {
+            break;
+        }
+        float zs = linearDepth(texelFetch(uDepth, ivec2(w), 0).r);
+        float behind = -q.z - zs;
+        // (a car is about 0.2 high, a lamp post thin: up to about 2m)
+        if (behind > 0.003 * zs && behind < 0.3 + 0.01 * zs) {
+            return 1.0 - fade * edgeFade(w);
+        }
+    }
+    return 1.0;
+}
+
 // Ice and water (the mirroring surfaces, masked in the glow's alpha as 1 - 1 for ice, 1 - 0.5 for water): a soft
 // mirror image of the scene, or of the sky where the reflection only meets that; more at grazing angles, and on
 // water rippling
@@ -390,6 +435,11 @@ void main() {
         // up to 1 blends the occlusion in, above that it deepens (ao^strength)
         float shade = uAOStrength <= 1.0 ? mix(1.0, ao, uAOStrength) : pow(ao, uAOStrength);
         c *= mix(1.0, shade, 1.0 - lit);
+    }
+    if (uSun.w > 0.0) {
+        // (light sources aren't shadowed)
+        float lit = uGlowStrength > 0.0 ? clamp(dot(textureLod(uGlow, p / size, 0.0).rgb, vec3(4.0)), 0.0, 1.0) : 0.0;
+        c *= 1.0 - min(0.38 * uSun.w, 0.8) * (1.0 - sunShadow(p)) * (1.0 - lit);
     }
     if (uIce > 0.0 || uWater > 0.0 || uPaint > 0.0) {
         c = mirror(p, size, c);
