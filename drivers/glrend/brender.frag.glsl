@@ -95,7 +95,8 @@ uniform bool alpha_to_coverage;
 uniform sampler2D glow_texture;
 uniform float glow_intensity;
 // How much this surface mirrors its surroundings (ice), written to the glow attachment's alpha as 1 - it for
-// the post-processing; below 0 when blending (the alpha then blends the glow, and the mask is left alone)
+// the post-processing; below 0 when blending (the alpha then blends the glow, and the mask is left alone), and
+// -0.25 for car paint that doesn't mirror
 uniform float surface_reflect;
 // Soft particles: the depth of the solid scene (drawn before the smoke), and the distance in front of it over
 // which a blended draw fades out; 0 for off
@@ -209,8 +210,8 @@ float relief(vec3 p, vec3 n, vec2 uv) {
     float hr = dot(textureGrad(main_texture, uv + vec2(t.x, 0.0), dx, dy).rgb, lum);
     float hd = dot(textureGrad(main_texture, uv - vec2(0.0, t.y), dx, dy).rgb, lum);
     float hu = dot(textureGrad(main_texture, uv + vec2(0.0, t.y), dx, dy).rgb, lum);
-    // the height's change per uv, then per window pixel; in world units (a height range of about 60cm: exaggerated)
-    vec2 dh = vec2(hr - hl, hu - hd) / (2.0 * t) * 0.09 * surface_haze[1].y;
+    // the height's change per uv, then per window pixel; in world units (a height range of about 35cm: exaggerated)
+    vec2 dh = vec2(hr - hl, hu - hd) / (2.0 * t) * 0.05 * surface_haze[1].y;
     float dhdx = dot(dh, dx);
     float dhdy = dot(dh, dy);
     vec3 dpdx = dFdx(p);
@@ -251,7 +252,8 @@ vec3 surfaceShading(vec3 model_pos, vec3 p, vec3 vertex_n, vec2 uv) {
         }
         float k = dot(n, surface_sun.xyz) - dot(surface_up.xyz, surface_sun.xyz);
         shade *= clamp(1.0 + surface_sun.w * 0.2 * k, 0.6, 1.04);
-        if (surface_haze[1].y > 0.0) {
+        // (not on the cars: their paint is smooth, and their textures' mottling would only make it look scaly)
+        if (surface_haze[1].y > 0.0 && abs(abs(surface_reflect) - 0.25) > 0.01) {
             shade *= clamp(1.0 + 2.0 * relief(p, n, uv), 0.6, 1.4);
         }
     }
