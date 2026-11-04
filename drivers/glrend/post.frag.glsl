@@ -221,8 +221,23 @@ float flatGround(vec2 p, vec3 P) {
     return smoothstep(0.88, 0.97, abs(dot(depthNormal(p, P), uUp)));
 }
 
-// Wet ground: the surfaces facing up reflect what glows (lights, neon, lit windows, car lights) as a mirror
-// would, stretched and softened towards the viewer as on wet asphalt, and stronger at grazing angles
+float hash12(vec2 q) {
+    vec3 q3 = fract(vec3(q.xyx) * 0.1031);
+    q3 += dot(q3, q3.yzx + 33.33);
+    return fract((q3.x + q3.y) * q3.z);
+}
+
+float noise2(vec2 x) {
+    vec2 i = floor(x);
+    vec2 f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash12(i), hash12(i + vec2(1.0, 0.0)), f.x), mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+// Wet ground: the surfaces facing up reflect what glows (lights, neon, lit windows, car lights), smeared towards
+// the viewer as on wet asphalt, and stronger at grazing angles. Not a mirror: how wet it is varies over the
+// ground (in the world, so it stays put), puddles reflecting more sharply and strongly than the damp rest, and
+// the rough surface breaks the reflection up
 vec3 wetGround(vec2 p, vec2 size) {
     if (texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
         return vec3(0.0);
@@ -239,16 +254,27 @@ vec3 wetGround(vec2 p, vec2 size) {
     if (hit.x < 0.0) {
         return vec3(0.0);
     }
+    // wetness: large patches (puddles a few metres across), with finer variation (the world unit is about 7m)
+    vec2 w = (uToWorld[3] + P.x * uToWorld[0] + P.y * uToWorld[1] + P.z * uToWorld[2]).xz;
+    float wet = smoothstep(0.4, 0.75, noise2(w * 1.6) * 0.75 + noise2(w * 7.0) * 0.25);
+    float rough = 1.0 - wet;
+    // the surface's grain jitters where the reflection is looked up, more where it is only damp
+    vec2 grain = vec2(hash12(p), hash12(p + 17.3)) - 0.5;
+    hit += grain * vec2(5.0, 9.0) * uScale * (0.4 + rough);
     vec3 sum = vec3(0.0);
-    float stretch = 0.004 * uView.w;
-    for (int k = -3; k <= 3; k++) {
-        float w = 1.0 - abs(float(k)) / 4.0;
-        sum += textureLod(uGlow, (hit + vec2(0.0, float(k) * stretch)) / size, 1.5).rgb * w;
+    float stretch = (0.004 + 0.005 * rough) * uView.w;
+    // and spread sideways a little, zigzagging, so the reflections of things side by side run together
+    float spread = (0.003 + 0.004 * rough) * uView.w;
+    float lod = mix(2.3, 3.6, rough);
+    for (int k = -4; k <= 4; k++) {
+        float weight = 1.0 - abs(float(k)) / 5.0;
+        float side = (fract(float(k) * 0.618 + 0.31) - 0.5) * 2.0;
+        sum += textureLod(uGlow, (hit + vec2(side * spread, float(k) * stretch)) / size, lod).rgb * weight;
     }
-    sum /= 4.0;
+    sum /= 5.0;
     float grazing = 1.0 - max(dot(-v, uUp), 0.0);
     float fresnel = 0.15 + 0.85 * grazing * grazing * grazing;
-    return sum * fresnel * flat_ground * edgeFade(hit) * uWet;
+    return sum * fresnel * flat_ground * edgeFade(hit) * uWet * (0.3 + 0.7 * wet);
 }
 
 // the ripples on water at view space point P: how they shift its mirror image, in window pixels
