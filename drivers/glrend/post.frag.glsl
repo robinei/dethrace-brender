@@ -331,29 +331,39 @@ float shadowDepth(int level, ivec2 t) {
     return texelFetch(uShadowMap[2], t, 0).r;
 }
 
-// How much the world point w is in the sun's shadow by the map of `level`, 0..1: 3x3 bilinear comparisons
-// `spacing` texels apart (soft edges), each counting only what is more than `gap` (world units) nearer the sun.
-// `fade`: 1 well inside the map, down to 0 towards (and beyond) its edges
-float shadowed(int level, vec3 w, float gap, float spacing, out float fade) {
+// view space point P in the map of `level`: its coordinates and depth (0..1)
+vec3 shadowCoord(int level, vec3 P) {
+    vec3 w = toWorld(P);
     vec3 lv = uShadowView[4 * level + 3] + w.x * uShadowView[4 * level] + w.y * uShadowView[4 * level + 1]
         + w.z * uShadowView[4 * level + 2];
     vec4 clip = uShadowProj[level] * vec4(lv, 1.0);
-    vec3 m = clip.xyz / clip.w * 0.5 + 0.5;
-    fade = 0.0;
-    if (m.x <= 0.0 || m.y <= 0.0 || m.x >= 1.0 || m.y >= 1.0 || m.z >= 1.0) {
-        return 0.0;
-    }
-    vec2 e = min(m.xy, 1.0 - m.xy) / 0.06;
-    fade = clamp(min(e.x, e.y), 0.0, 1.0);
+    return clip.xyz / clip.w * 0.5 + 0.5;
+}
+
+// a vector at least `least` long, in its direction
+vec2 atLeast(vec2 v, float least) {
+    float l = length(v);
+    return l < least ? (l > 1e-6 ? v * (least / l) : vec2(least, 0.0)) : v;
+}
+
+// How much the point at map coordinates m (of `level`) is in the sun's shadow, 0..1: bilinear comparisons at a
+// grid of taps over the pixel's footprint in the map (ax, ay: across the pixel, in texels; at least 2 texels, for
+// soft edges), as many along each as it spans texels (2 to 6), so far off and at grazing angles thin shadows
+// aren't stepped over (they flickered); each counting only what is more than `gap` (world units) nearer the sun
+float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float gap) {
     // (the map's depth is linear over its depth range: 2 / its projection's z scale)
     float threshold = m.z - gap * abs(uShadowProj[level][2][2]) * 0.5 - 0.00005;
     float texels = 1.0 / uShadowTexel[level];
     int last = int(texels) - 1;
+    vec2 a = atLeast(ax, 2.0);
+    vec2 b = atLeast(ay, 2.0);
+    int nx = int(clamp(ceil(length(a)), 2.0, 6.0));
+    int ny = int(clamp(ceil(length(b)), 2.0, 6.0));
     vec2 f = m.xy * texels - 0.5;
     float sum = 0.0;
-    for (int j = -1; j <= 1; j++) {
-        for (int i = -1; i <= 1; i++) {
-            vec2 g = f + vec2(float(i), float(j)) * spacing;
+    for (int j = 0; j < ny; j++) {
+        for (int i = 0; i < nx; i++) {
+            vec2 g = f + a * ((float(i) + 0.5) / float(nx) - 0.5) + b * ((float(j) + 0.5) / float(ny) - 0.5);
             ivec2 t = ivec2(floor(g));
             vec2 fr = g - floor(g);
             float s00 = shadowDepth(level, clamp(t, ivec2(0), ivec2(last))) < threshold ? 1.0 : 0.0;
@@ -363,28 +373,51 @@ float shadowed(int level, vec3 w, float gap, float spacing, out float fade) {
             sum += mix(mix(s00, s10, fr.x), mix(s01, s11, fr.x), fr.y);
         }
     }
-    return sum / 9.0;
+    return sum / float(nx * ny);
 }
 
-// How much view space point P (surface normal n, facing the sun by `facing`) is in the sun's shadow, 0..1, by
-// the first of the maps that covers it (the nearer ones being sharper), blending into the next towards its
-// edges. The edges are about 3 screen pixels soft, or 3 texels where those are bigger. Sprites are looked up
-// just in front of their card, and only what is more than `gap` nearer the sun counts
-float shadowLevels(vec3 P, vec3 n, float facing, float gap, bool sprite) {
+// the view space direction through window pixel q
+vec3 viewRay(vec2 q) {
+    vec2 ndc = (q - uView.xy) / uView.zw * 2.0 - 1.0;
+    return vec3(ndc.x / uProj.x, ndc.y / uProj.y, -1.0);
+}
+
+// How much view space point P (window pixel p, surface normal n, facing the sun by `facing`) is in the sun's
+// shadow, 0..1, by the first of the maps that covers it (the nearer ones being sharper), blending into the next
+// towards its edges. The filter covers the pixel's footprint on the surface (its neighbours' rays met with the
+// surface's plane). Sprites are looked up just in front of their card, and only what is more than `gap` nearer
+// the sun counts
+float shadowLevels(vec2 p, vec3 P, vec3 n, float facing, float gap, bool sprite) {
     float dist = -P.z;
-    float pixel = 2.0 * dist / (uProj.y * uView.w);
+    vec3 rx = viewRay(p + vec2(1.0, 0.0));
+    vec3 ry = viewRay(p + vec2(0.0, 1.0));
+    float plane = dot(P, n);
+    vec3 Px = rx * (plane / min(dot(rx, n), -1e-4));
+    vec3 Py = ry * (plane / min(dot(ry, n), -1e-4));
     float result = 0.0;
     float remaining = 1.0;
     for (int level = 0; level < 3; level++) {
         if (uShadowTexel[level] <= 0.0) {
             continue;
         }
+        float texels = 1.0 / uShadowTexel[level];
         // (a texel in world units: the map's width, 2 / its projection's x scale, over its texels)
         float texel = 2.0 / uShadowProj[level][0][0] * uShadowTexel[level];
         // a little off the surface, along its normal, more at grazing angles to the sun (against shadow acne)
         vec3 Q = sprite ? P + n * 0.01 : P + n * (1.5 * texel + 0.0003 * dist) * (1.0 + 2.0 * (1.0 - max(facing, 0.0)));
-        float fade;
-        float s = shadowed(level, toWorld(Q), gap, max(1.0, pixel / texel), fade);
+        vec3 m = shadowCoord(level, Q);
+        if (m.x <= 0.0 || m.y <= 0.0 || m.x >= 1.0 || m.y >= 1.0 || m.z >= 1.0) {
+            continue;
+        }
+        vec2 e = min(m.xy, 1.0 - m.xy) / 0.06;
+        float fade = clamp(min(e.x, e.y), 0.0, 1.0);
+        // the footprint: across the pixel, in this map's texels (at most 64 texels, against stray rays)
+        vec3 m0 = shadowCoord(level, P);
+        vec2 ax = (shadowCoord(level, Px).xy - m0.xy) * texels;
+        vec2 ay = (shadowCoord(level, Py).xy - m0.xy) * texels;
+        ax *= min(1.0, 64.0 / max(length(ax), 1e-6));
+        ay *= min(1.0, 64.0 / max(length(ay), 1e-6));
+        float s = shadowed(level, m, ax, ay, gap);
         result += remaining * fade * s;
         remaining *= 1.0 - fade;
         if (remaining <= 0.001) {
@@ -410,7 +443,7 @@ float sunShadow(vec2 p, vec2 size) {
     // how bright what is in shadow is, relative to the ground in the sun
     float shade_level = 1.0 - min(0.38 * uSun.w, 0.8);
     if (isSprite(p)) {
-        return mix(1.0, shade_level, shadowLevels(P, n, facing, 0.15, true));
+        return mix(1.0, shade_level, shadowLevels(p, P, n, facing, 0.15, true));
     }
     // the sun shading the surface already has (see surfaceShading in brender.frag.glsl), which shadow only adds to
     float sun_shade = clamp(1.0 + uSunShading * 0.2 * (facing - dot(uUp, s)), 0.6, 1.04);
@@ -419,7 +452,7 @@ float sunShadow(vec2 p, vec2 size) {
     float front = smoothstep(-0.02, 0.12, facing);
     float in_shadow = 1.0;
     if (front > 0.0) {
-        in_shadow = mix(1.0, shadowLevels(P, n, facing, 0.0, false), front);
+        in_shadow = mix(1.0, shadowLevels(p, P, n, facing, 0.0, false), front);
     }
     return mix(1.0, target, in_shadow);
 }
