@@ -184,7 +184,7 @@ float blobShadow(vec3 p, vec3 n) {
 // surface_up.w) to break up tiled textures
 uniform vec4 surface_sun;
 uniform vec4 surface_up;  // the world's up in view space
-uniform vec4 surface_haze[2]; // haze colour, most of it; the distance most of it is reached by, relief strength
+uniform vec4 surface_haze[2]; // haze colour, most of it; the distance most of it is reached by, relief strength, night haze strength
 
 float hash3(vec3 p) {
     p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
@@ -440,12 +440,20 @@ float doDistanceFog() {
         float t = clamp((d - fog_min) / max(fog_max - fog_min, 0.0001), 0.0, 1.0);
         // dense early like the original (about half at a quarter of the way), then easing into full fog
         float f = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
+        vec3 colour = fog_colour;
+        if (fog_colour == vec3(0.0) && surface_haze[1].z > 0.0) {
+            // night haze instead of darkness: easing in to its strength, in the sky's colour, and only at the far
+            // edge all of it (what is beyond the draw distance is not there)
+            f = surface_haze[1].z * (1.0 - exp(-3.0 * t)) / (1.0 - exp(-3.0));
+            f = mix(f, 1.0, smoothstep(0.8, 1.0, t));
+            colour = surface_haze[0].rgb;
+        }
         if (fog_colour == vec3(0.0)) {
             // headlights reach into the darkness
             vec3 l = spotLight + flashLight;
             f *= 1.0 - clamp(max(l.r, max(l.g, l.b)), 0.0, 1.0);
         }
-        fragColour.rgb = mix(fragColour.rgb, fog_colour * scene_brightness, f);
+        fragColour.rgb = mix(fragColour.rgb, colour * scene_brightness, f);
         return f;
     }
     if (fog_enabled) {
