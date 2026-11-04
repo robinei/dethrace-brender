@@ -410,7 +410,7 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
             /* it can change within a scene (off for the sky) */
             float surface[BR_GL_SCENE_SURFACE_FLOATS] = { 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
             if (!hVideo->sceneSurface(surface)) {
-                surface[3] = surface[7] = surface[11] = 0.0f;
+                surface[3] = surface[7] = surface[11] = surface[13] = 0.0f;
             }
             if (memcmp(surface, hVideo->sceneSurfaceUploaded, sizeof(surface)) != 0) {
                 glUniform4fv(hVideo->brenderProgram.uniforms.surface_sun, 1, &surface[0]);

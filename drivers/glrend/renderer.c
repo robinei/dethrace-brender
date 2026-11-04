@@ -141,7 +141,7 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
     {
         float surface[BR_GL_SCENE_SURFACE_FLOATS] = { 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
         if (hVideo->sceneSurface == NULL || !hVideo->sceneSurface(surface)) {
-            surface[3] = surface[7] = surface[11] = 0.0f;
+            surface[3] = surface[7] = surface[11] = surface[13] = 0.0f;
         }
         glUniform4fv(hVideo->brenderProgram.uniforms.surface_sun, 1, &surface[0]);
         glUniform4fv(hVideo->brenderProgram.uniforms.surface_up, 1, &surface[4]);

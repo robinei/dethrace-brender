@@ -173,7 +173,7 @@ float blobShadow(vec3 p, vec3 n) {
 // surface_up.w) to break up tiled textures
 uniform vec4 surface_sun;
 uniform vec4 surface_up;  // the world's up in view space
-uniform vec4 surface_haze[2]; // haze colour, most of it; the distance most of it is reached by
+uniform vec4 surface_haze[2]; // haze colour, most of it; the distance most of it is reached by, relief strength
 
 float hash3(vec3 p) {
     p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
@@ -191,7 +191,41 @@ float valueNoise(vec3 x) {
                    mix(hash3(i + vec3(0.0, 1.0, 1.0)), hash3(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);
 }
 
-vec3 surfaceShading(vec3 model_pos, vec3 p, vec3 vertex_n) {
+// Relief: the texture's brightness taken as height (bright is raised), how much brighter or darker the sun makes
+// the surface by it, by the normal tilted along its gradient (without tangents: from the screen derivatives).
+// Fades out where the texture is minified, where it would only shimmer
+float relief(vec3 p, vec3 n, vec2 uv) {
+    vec2 size = vec2(textureSize(main_texture, 0));
+    vec2 dx = dFdx(uv);
+    vec2 dy = dFdy(uv);
+    float texels = max(length(dx * size), length(dy * size));
+    float fade = 1.0 - smoothstep(0.8, 2.5, texels);
+    if (fade <= 0.0) {
+        return 0.0;
+    }
+    vec2 t = 1.0 / size;
+    const vec3 lum = vec3(0.299, 0.587, 0.114);
+    float hl = dot(textureGrad(main_texture, uv - vec2(t.x, 0.0), dx, dy).rgb, lum);
+    float hr = dot(textureGrad(main_texture, uv + vec2(t.x, 0.0), dx, dy).rgb, lum);
+    float hd = dot(textureGrad(main_texture, uv - vec2(0.0, t.y), dx, dy).rgb, lum);
+    float hu = dot(textureGrad(main_texture, uv + vec2(0.0, t.y), dx, dy).rgb, lum);
+    // the height's change per uv, then per window pixel; in world units (a height range of about 60cm: exaggerated)
+    vec2 dh = vec2(hr - hl, hu - hd) / (2.0 * t) * 0.09 * surface_haze[1].y;
+    float dhdx = dot(dh, dx);
+    float dhdy = dot(dh, dy);
+    vec3 dpdx = dFdx(p);
+    vec3 dpdy = dFdy(p);
+    vec3 r1 = cross(dpdy, n);
+    vec3 r2 = cross(n, dpdx);
+    float det = dot(dpdx, r1);
+    if (abs(det) < 1e-20) {
+        return 0.0;
+    }
+    vec3 nb = normalize(abs(det) * n - sign(det) * (dhdx * r1 + dhdy * r2));
+    return (dot(nb, surface_sun.xyz) - dot(n, surface_sun.xyz)) * fade;
+}
+
+vec3 surfaceShading(vec3 model_pos, vec3 p, vec3 vertex_n, vec2 uv) {
     vec3 shade = vec3(1.0);
     if (surface_sun.w > 0.0) {
         // relative to the ground, which keeps its brightness: walls turned away from the sun darken. The face's
@@ -217,6 +251,9 @@ vec3 surfaceShading(vec3 model_pos, vec3 p, vec3 vertex_n) {
         }
         float k = dot(n, surface_sun.xyz) - dot(surface_up.xyz, surface_sun.xyz);
         shade *= clamp(1.0 + surface_sun.w * 0.2 * k, 0.6, 1.04);
+        if (surface_haze[1].y > 0.0) {
+            shade *= clamp(1.0 + 2.0 * relief(p, n, uv), 0.6, 1.4);
+        }
     }
     if (surface_up.w > 0.0) {
         // patches several metres across (the world unit is about 7m), two octaves, and a hint of warm/cool
@@ -439,7 +476,7 @@ void main() {
     // (the track materials are lit or not as their files say, so this goes by whether there is a normal:
     // not for the sprites)
     if ((surface_sun.w > 0.0 || surface_up.w > 0.0) && !disable_texture && dot(normal.xyz, normal.xyz) > 0.01) {
-        fragColour.rgb *= surfaceShading(rawPosition, position.xyz, normal.xyz);
+        fragColour.rgb *= surfaceShading(rawPosition, position.xyz, normal.xyz, mappedUV);
     }
 
     vec3 flashColour = vec3(0.0);
