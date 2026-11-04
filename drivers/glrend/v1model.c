@@ -392,8 +392,12 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
             glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, maxAnisotropy);
 
         blending_on = (state->prim.flags & PRIMF_BLEND) || (state->prim.colour_map != NULL && state->prim.colour_map->blended);
-        /* translucent things (water, glass, smoke) cast no shadow */
+        /* translucent things (water, glass, smoke) cast no shadow, and leave the normals of what is behind them */
         hVideo->shadow.skip = blending_on;
+        if (hVideo->post.active && !hVideo->shadow.active) {
+            br_boolean normals = !blending_on && (state->prim.flags & PRIMF_COLOUR_WRITE);
+            glColorMaski(2, normals, normals, normals, normals);
+        }
         /*
          * The glow attachment's alpha (of a post-processed view) is a mask of the mirroring surfaces, stored as
          * 1 - reflect: opaque draws write theirs, blended ones leave it (their output alpha only blends the glow),

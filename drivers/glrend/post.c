@@ -34,13 +34,13 @@
 enum {
     U_COLOUR, U_DEPTH, U_GLOW, U_AO, U_VIEW, U_PROJ, U_NEAR, U_FAR, U_TIME, U_SCALE, U_START, U_END, U_MAX_RADIUS,
     U_GLOW_STRENGTH, U_FLARE_STRENGTH, U_AO_STRENGTH, U_SPEED, U_SHIMMER_COUNT, U_SHIMMERS, U_GRADE, U_AO_DEPTH,
-    U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN, U_SHADOW_MAP, U_SHADOW_PROJ, U_SHADOW_VIEW, U_SHADOW_TEXEL, U_SUN_SHADING, U_HAS_GLOW,
+    U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN, U_SHADOW_MAP, U_SHADOW_PROJ, U_SHADOW_VIEW, U_SHADOW_TEXEL, U_SUN_SHADING, U_NORMAL,
     U_COUNT
 };
 static const char* uniform_names[U_COUNT] = {
     "uColour", "uDepth", "uGlow", "uAO", "uView", "uProj", "uNear", "uFar", "uTime", "uScale", "uStart", "uEnd",
     "uMaxRadius", "uGlowStrength", "uFlareStrength", "uAOStrength", "uSpeed", "uShimmerCount", "uShimmers", "uGrade", "uAODepth",
-    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun", "uShadowMap", "uShadowProj", "uShadowView", "uShadowTexel", "uSunShading", "uHasGlow"
+    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun", "uShadowMap", "uShadowProj", "uShadowView", "uShadowTexel", "uSunShading", "uNormal"
 };
 enum {
     W_TO_WORLD, W_VIEW, W_PROJ, W_SIZE, W_TIME, W_SCALE, W_RAIN, W_BOX, W_DEPTH, W_NEAR, W_FAR, W_BRIGHTNESS, W_AMOUNT,
@@ -60,6 +60,9 @@ static void delete_targets(HVIDEO hVideo) {
     glDeleteRenderbuffers(1, &hVideo->post.msaaColour);
     glDeleteRenderbuffers(1, &hVideo->post.msaaGlow);
     glDeleteRenderbuffers(1, &hVideo->post.msaaDepth);
+    glDeleteRenderbuffers(1, &hVideo->post.msaaNormal);
+    glDeleteTextures(1, &hVideo->post.normalTex);
+    hVideo->post.msaaNormal = hVideo->post.normalTex = 0;
     glDeleteFramebuffers(1, &hVideo->post.resolveFbo);
     glDeleteTextures(1, &hVideo->post.colourTex);
     glDeleteTextures(1, &hVideo->post.glowTex);
@@ -97,6 +100,7 @@ static br_error create_targets(HVIDEO hVideo, int width, int height, int samples
 
     hVideo->post.colourTex = create_texture(GL_RGBA8, width, height, GL_RGBA, GL_UNSIGNED_BYTE, GL_LINEAR, 0);
     hVideo->post.depthTex = create_texture(GL_DEPTH_COMPONENT24, width, height, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, GL_NEAREST, 0);
+    hVideo->post.normalTex = create_texture(GL_RGB10_A2, width, height, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV, GL_NEAREST, 0);
     if (glow) {
         hVideo->post.glowTex = create_texture(GL_RGBA8, width, height, GL_RGBA, GL_UNSIGNED_BYTE, GL_LINEAR, 1);
     }
@@ -110,6 +114,7 @@ static br_error create_targets(HVIDEO hVideo, int width, int height, int samples
     if (glow) {
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, hVideo->post.glowTex, 0);
     }
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, hVideo->post.normalTex, 0);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, hVideo->post.depthTex, 0);
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
         BR_WARNING0("GLREND: post-processing resolve framebuffer incomplete");
@@ -138,6 +143,9 @@ static br_error create_targets(HVIDEO hVideo, int width, int height, int samples
             glBindRenderbuffer(GL_RENDERBUFFER, hVideo->post.msaaGlow);
             glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_RGBA8, width, height);
         }
+        glGenRenderbuffers(1, &hVideo->post.msaaNormal);
+        glBindRenderbuffer(GL_RENDERBUFFER, hVideo->post.msaaNormal);
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_RGB10_A2, width, height);
         glGenRenderbuffers(1, &hVideo->post.msaaDepth);
         glBindRenderbuffer(GL_RENDERBUFFER, hVideo->post.msaaDepth);
         glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH_COMPONENT24, width, height);
@@ -148,6 +156,7 @@ static br_error create_targets(HVIDEO hVideo, int width, int height, int samples
         if (glow) {
             glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_RENDERBUFFER, hVideo->post.msaaGlow);
         }
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_RENDERBUFFER, hVideo->post.msaaNormal);
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, hVideo->post.msaaDepth);
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
             BR_WARNING0("GLREND: post-processing multisampled framebuffer incomplete");
@@ -284,9 +293,10 @@ br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap* screen, br_boolean gl
     glDepthMask(GL_TRUE);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClearDepth(1.0);
-    if (hVideo->post.glowTex != 0) {
-        static const GLenum both[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
-        glDrawBuffers(2, both);
+    {
+        static const GLenum all[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
+        static const GLenum no_glow[] = { GL_COLOR_ATTACHMENT0, GL_NONE, GL_COLOR_ATTACHMENT2 };
+        glDrawBuffers(3, hVideo->post.glowTex != 0 ? all : no_glow);
     }
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     {
@@ -349,9 +359,12 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
             glReadBuffer(GL_COLOR_ATTACHMENT1);
             glDrawBuffer(GL_COLOR_ATTACHMENT1);
             glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-            glReadBuffer(GL_COLOR_ATTACHMENT0);
-            glDrawBuffer(GL_COLOR_ATTACHMENT0);
         }
+        glReadBuffer(GL_COLOR_ATTACHMENT2);
+        glDrawBuffer(GL_COLOR_ATTACHMENT2);
+        glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glDrawBuffer(GL_COLOR_ATTACHMENT0);
     }
     if (hVideo->post.glowTex != 0) {
         glBindTexture(GL_TEXTURE_2D, hVideo->post.glowTex);
@@ -455,12 +468,17 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
         glUniform1fv(u[U_SHADOW_TEXEL], 3, texels);
     }
     glUniform1f(u[U_SUN_SHADING], params->sun_shading);
-    glUniform1f(u[U_HAS_GLOW], hVideo->post.glowTex != 0 ? 1.0f : 0.0f);
+    glActiveTexture(GL_TEXTURE8);
+    glBindTexture(GL_TEXTURE_2D, hVideo->post.normalTex);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform1i(u[U_NORMAL], 8);
     glUniform1f(u[U_PAINT], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->paint : 0.0f);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     draw_weather(hVideo, params, w, h);
 
     glBindVertexArray(0);
+    glActiveTexture(GL_TEXTURE8);
+    glBindTexture(GL_TEXTURE_2D, 0);
     for (int level = 2; level >= 0; level--) {
         glActiveTexture(GL_TEXTURE5 + level);
         glBindTexture(GL_TEXTURE_2D, 0);

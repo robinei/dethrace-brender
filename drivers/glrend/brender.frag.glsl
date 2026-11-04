@@ -88,6 +88,9 @@ in vec3 v_frag_pos;
 layout (location = 0) out vec4 fragColour;
 // Light sources, for the post-processed bloom (only stored while the view is post-processed)
 layout (location = 1) out vec4 glowColour;
+// The surface's view space normal (as the sun shading takes it, facing the viewer), for the post-processing's
+// shadows and reflections, and in alpha: 2/3 for a surface, 1 for a sprite (only while post-processing)
+layout (location = 2) out vec4 normalColour;
 
 uniform sampler2D main_texture;
 uniform bool alpha_to_coverage;
@@ -248,29 +251,38 @@ vec3 carWear(vec3 c, vec3 model_pos) {
     return mix(c, vec3(0.62, 0.6, 0.57), scratch * 0.55 * min(w, 1.0));
 }
 
+// The surface's normal at view space point p, facing the viewer: the face's own (flat) normal; and the (smooth)
+// vertex normal turned to the same side, where it is close to it: across gentle folds (faceted rock, banks) it
+// is smooth, at creases (the road against a wall, where the vertex normals are averaged to halfway) it stays
+// the face's own. Zero where there is none
+vec3 surfaceNormal(vec3 p, vec3 vertex_n) {
+    vec3 n = cross(dFdx(p), dFdy(p));
+    if (dot(n, n) < 1e-20) {
+        return vec3(0.0);
+    }
+    n = normalize(n);
+    if (dot(n, -p) < 0.0) {
+        n = -n;
+    }
+    if (dot(vertex_n, vertex_n) > 0.01) {
+        vec3 v = normalize(vertex_n);
+        float c = dot(v, n);
+        if (c < 0.0) {
+            v = -v;
+            c = -c;
+        }
+        n = normalize(mix(n, v, smoothstep(0.8, 0.95, c)));
+    }
+    return n;
+}
+
 vec3 surfaceShading(vec3 model_pos, vec3 p, vec3 vertex_n, vec2 uv, vec2 relief_uv) {
     vec3 shade = vec3(1.0);
     if (surface_sun.w > 0.0) {
-        // relative to the ground, which keeps its brightness: walls turned away from the sun darken. The face's
-        // own (flat) normal, of the side seen; and the (smooth) vertex normal turned to the same side, where it
-        // is close to it: across gentle folds (faceted rock, banks) the shading is smooth, at creases (the road
-        // against a wall, where the vertex normals are averaged to halfway) it stays the face's own
-        vec3 n = cross(dFdx(p), dFdy(p));
-        if (dot(n, n) < 1e-20) {
+        // relative to the ground, which keeps its brightness: walls turned away from the sun darken
+        vec3 n = surfaceNormal(p, vertex_n);
+        if (dot(n, n) < 0.5) {
             return shade;
-        }
-        n = normalize(n);
-        if (dot(n, -p) < 0.0) {
-            n = -n;
-        }
-        if (dot(vertex_n, vertex_n) > 0.01) {
-            vec3 v = normalize(vertex_n);
-            float c = dot(v, n);
-            if (c < 0.0) {
-                v = -v;
-                c = -c;
-            }
-            n = normalize(mix(n, v, smoothstep(0.8, 0.95, c)));
         }
         float k = dot(n, surface_sun.xyz) - dot(surface_up.xyz, surface_sun.xyz);
         shade *= clamp(1.0 + surface_sun.w * 0.2 * k, 0.6, 1.04);
@@ -588,7 +600,10 @@ void main() {
     // what a flash lights glows a little too
     glowColour.rgb += flashColour * 0.25 * (1.0 - fog);
     if (surface_reflect >= 0.0) {
-        // (the sprites are marked 1 - 0.04, for the sun shadows)
-        glowColour.a = surface_sprite ? 0.96 : 1.0 - surface_reflect * (dot(normal.xyz, normal.xyz) > 0.01 ? 1.0 : 0.0);
+        glowColour.a = 1.0 - surface_reflect * (dot(normal.xyz, normal.xyz) > 0.01 ? 1.0 : 0.0);
+    }
+    {
+        vec3 sn = surfaceNormal(position.xyz, normal.xyz);
+        normalColour = dot(sn, sn) > 0.5 ? vec4(sn * 0.5 + 0.5, surface_sprite ? 1.0 : 2.0 / 3.0) : vec4(0.5, 0.5, 1.0, surface_sprite ? 1.0 : 0.0);
     }
 }

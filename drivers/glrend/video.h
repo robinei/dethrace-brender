@@ -108,8 +108,9 @@ typedef struct _VIDEO {
     struct {
         int active;
         int width, height, samples;
-        GLuint msaaFbo, msaaColour, msaaGlow, msaaDepth; /* multisampled target, when samples > 0 */
+        GLuint msaaFbo, msaaColour, msaaGlow, msaaDepth, msaaNormal; /* multisampled target, when samples > 0 */
         GLuint resolveFbo, colourTex, glowTex, depthTex;
+        GLuint normalTex; /* the surfaces' view space normals (and the sprites' mark), see brender.frag.glsl */
         GLuint aoFbo[2], aoTex[2]; /* ambient occlusion, half resolution (and a target for its blur) */
         GLuint aoDepthFbo, aoDepthTex; /* the depth snapshot the ambient occlusion uses, see BrGLPostProcessDepthSnapshot */
         int depthSnapshot;

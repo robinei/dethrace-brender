@@ -54,9 +54,10 @@ uniform sampler2D uShadowMap[3];
 uniform mat4 uShadowProj[3];
 uniform vec3 uShadowView[12];
 uniform float uShadowTexel[3];
-// the strength of the scene's sun shading (see brender.frag.glsl), and whether there is a glow attachment
+// the strength of the scene's sun shading (see brender.frag.glsl)
 uniform float uSunShading;
-uniform float uHasGlow;
+// the surfaces' view space normals (and the sprites' mark), from the 3d scenes (see brender.frag.glsl)
+uniform sampler2D uNormal;
 
 out vec4 fragColour;
 
@@ -225,9 +226,25 @@ vec3 depthNormal(vec2 p, vec3 P) {
     return dot(n, P) > 0.0 ? -n : n;
 }
 
+// the surface's normal at window pixel p (view space point P), facing the viewer: as the scene wrote it, or else
+// from the depths
+vec3 viewNormal(vec2 p, vec3 P) {
+    vec4 t = texelFetch(uNormal, ivec2(p), 0);
+    vec3 n = t.xyz * 2.0 - 1.0;
+    if (t.a > 0.3 && dot(n, n) > 0.25) {
+        return normalize(n);
+    }
+    return depthNormal(p, P);
+}
+
+// whether the surface at window pixel p is a sprite (a flat card facing the camera, see brender.frag.glsl)
+bool isSprite(vec2 p) {
+    return texelFetch(uNormal, ivec2(p), 0).a > 0.85;
+}
+
 // how flat (facing up) the surface at P is
 float flatGround(vec2 p, vec3 P) {
-    return smoothstep(0.88, 0.97, abs(dot(depthNormal(p, P), uUp)));
+    return smoothstep(0.88, 0.97, abs(dot(viewNormal(p, P), uUp)));
 }
 
 float hash12(vec2 q) {
@@ -380,7 +397,7 @@ float shadowLevels(vec3 P, vec3 n, float facing, float gap, bool sprite) {
 // Sun shadows (the sun's shadow maps, of all the world): what the colour at p is multiplied by. What is in shadow
 // ends up equally dark: the ground under a bridge, and the faces turned away from the sun (which get no sun
 // either), those only darkened as far as the sun shading hasn't already. The sprites (pedestrians: flat cards
-// facing the camera, marked in the glow's alpha) go by the maps alone, whichever way they face, not counting the
+// facing the camera, marked with their normals) go by the maps alone, whichever way they face, not counting the
 // slight overlap of their sun facing selves in the maps
 float sunShadow(vec2 p, vec2 size) {
     if (uShadowTexel[0] + uShadowTexel[1] + uShadowTexel[2] <= 0.0 || texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
@@ -388,11 +405,11 @@ float sunShadow(vec2 p, vec2 size) {
     }
     vec3 P = viewPosition(p);
     vec3 s = normalize(uSun.xyz);
-    vec3 n = depthNormal(p, P);
+    vec3 n = viewNormal(p, P);
     float facing = dot(n, s);
     // how bright what is in shadow is, relative to the ground in the sun
     float shade_level = 1.0 - min(0.38 * uSun.w, 0.8);
-    if (uHasGlow > 0.5 && abs(1.0 - textureLod(uGlow, p / size, 0.0).a - 0.04) < 0.018) {
+    if (isSprite(p)) {
         return mix(1.0, shade_level, shadowLevels(P, n, facing, 0.15, true));
     }
     // the sun shading the surface already has (see surfaceShading in brender.frag.glsl), which shadow only adds to
@@ -412,8 +429,7 @@ float sunShadow(vec2 p, vec2 size) {
 // water rippling
 vec3 mirror(vec2 p, vec2 size, vec3 c) {
     float amount = 1.0 - textureLod(uGlow, p / size, 0.0).a;
-    // (below: none, or the sprites' mark, see the sun shadows)
-    if (amount <= 0.07 || texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
+    if (amount <= 0.01 || texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
         return c;
     }
     // (the kinds' masks blend at their edges, which then pass for another kind for a pixel)
@@ -433,7 +449,7 @@ vec3 mirror(vec2 p, vec2 size, vec3 c) {
     }
     vec3 v = normalize(P);
     // ice and water lie flat; the car bodies go by their facets
-    vec3 n = paint ? depthNormal(p, P) : uUp;
+    vec3 n = paint ? viewNormal(p, P) : uUp;
     if (dot(v, n) >= 0.0) {
         // seen from below (the camera under water)
         return c;

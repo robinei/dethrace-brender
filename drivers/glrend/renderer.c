@@ -149,10 +149,12 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
         memcpy(hVideo->sceneSurfaceUploaded, surface, sizeof(surface));
     }
     glUniform1f(hVideo->brenderProgram.uniforms.glow_intensity, 0.0f);
-    if (hVideo->post.active && hVideo->post.glowTex != 0) {
-        /* light sources go to the glow attachment, for the post-processed bloom */
-        static const GLenum both[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
-        glDrawBuffers(2, both);
+    if (hVideo->post.active) {
+        /* light sources go to the glow attachment, for the post-processed bloom; the surfaces' normals to the
+         * third, for the post-processing */
+        static const GLenum all[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
+        static const GLenum no_glow[] = { GL_COLOR_ATTACHMENT0, GL_NONE, GL_COLOR_ATTACHMENT2 };
+        glDrawBuffers(3, hVideo->post.glowTex != 0 ? all : no_glow);
     }
     glUniform1i(hVideo->brenderProgram.uniforms.alpha_to_coverage, hVideo->sampleBuffers != 0);
     glUniform1i(hVideo->brenderProgram.uniforms.fog_distance, hVideo->fogDistance != 0);
