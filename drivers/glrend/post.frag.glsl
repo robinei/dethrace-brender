@@ -160,7 +160,9 @@ vec2 toWindow(vec3 v) {
 // the sky). Behind something in front (a car) it carries on, so reflections don't stop at its outline;
 // `to_sky` tells whether, without meeting anything, it went only in front of the sky at the end (so it would
 // show the sky), rather than behind anything or out of the view in front of something else
-vec2 traceReflection(vec3 P, vec3 n, vec3 ray, vec2 p, out bool to_sky, out vec2 last) {
+// `jitter`: how much each pixel's start is offset (against banding), 0 for none (where the result must be smooth
+// across neighbouring pixels: the glossy paint, whose jittered rays scattered into a dotted pattern)
+vec2 traceReflection(vec3 P, vec3 n, vec3 ray, vec2 p, float jitter_amount, out bool to_sky, out vec2 last) {
     bool hidden = false;
     bool over_sky = false;
     to_sky = false;
@@ -170,7 +172,7 @@ vec2 traceReflection(vec3 P, vec3 n, vec3 ray, vec2 p, out bool to_sky, out vec2
     vec3 q = P + n * (0.01 + 0.004 * dist);
     float step_len = 0.03 + 0.02 * dist;
     float jitter = fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
-    q += ray * step_len * jitter;
+    q += ray * step_len * jitter * jitter_amount;
     vec3 prev = q;
     for (int i = 0; i < 28; i++) {
         prev = q;
@@ -276,7 +278,7 @@ vec3 wetGround(vec2 p, vec2 size) {
     vec3 v = normalize(P);
     bool to_sky;
     vec2 last;
-    vec2 hit = traceReflection(P, uUp, reflect(v, uUp), p, to_sky, last);
+    vec2 hit = traceReflection(P, uUp, reflect(v, uUp), p, 1.0, to_sky, last);
     if (hit.x < 0.0) {
         return vec3(0.0);
     }
@@ -490,7 +492,7 @@ vec3 mirror(vec2 p, vec2 size, vec3 c) {
     vec3 ray = reflect(v, n);
     bool to_sky;
     vec2 last;
-    vec2 hit = traceReflection(P, n, ray, p, to_sky, last);
+    vec2 hit = traceReflection(P, n, ray, p, paint ? 0.0 : 1.0, to_sky, last);
     float fade = 1.0;
     if (hit.x < 0.0 && paint) {
         // a gloss: what is that way, roughly (where the ray left the view)
