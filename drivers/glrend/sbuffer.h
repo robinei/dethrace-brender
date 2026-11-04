@@ -63,6 +63,12 @@ typedef struct br_buffer_stored {
     int glow_id;
     br_boolean glow_checked;
 
+    /*
+     * How much surfaces with this texture mirror their surroundings, from the device's texture_reflect callback
+     */
+    float reflect;
+    br_boolean reflect_checked;
+
     br_boolean paletted_source_dirty;
     br_uint_32 palette_revision;
     struct br_device_clut *palette_pointer;

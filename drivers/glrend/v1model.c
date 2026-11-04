@@ -7,8 +7,11 @@
 #include "xbr.h"
 #include <string.h>
 
-static void apply_blend_mode(state_stack* self) {
+static void apply_blend_mode(state_stack* self, br_boolean keep_alpha) {
     /* C_result = (C_source * F_Source) + (C_dest * F_dest) */
+    /* keep_alpha: the destination alpha stays (the glow attachment's alpha is the reflection mask, see below) */
+    GLenum src_alpha = keep_alpha ? GL_ZERO : GL_ONE;
+    GLenum dst_alpha = keep_alpha ? GL_ONE : GL_ZERO;
 
     /* NB: srcAlpha and dstAlpha are all GL_ONE and GL_ZERO respectively. */
     switch (self->prim.blend_mode) {
@@ -22,7 +25,7 @@ static void apply_blend_mode(state_stack* self) {
          * Colour = (alpha * src) + ((1 - alpha) * dest)
          * Alpha  = (1     * src) + (0           * dest)
          */
-        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
+        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, src_alpha, dst_alpha);
         break;
 
     case BRT_BLEND_SUMMED:
@@ -31,7 +34,7 @@ static void apply_blend_mode(state_stack* self) {
          * Colour = (alpha * src) + (1 * dest)
          * Alpha  = (1     * src) + (0 * dest)
          */
-        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE, GL_ONE, GL_ZERO);
+        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE, src_alpha, dst_alpha);
         break;
 
     case BRT_BLEND_PREMULTIPLIED:
@@ -40,7 +43,7 @@ static void apply_blend_mode(state_stack* self) {
          * Colour = (1 * src) + ((1 - alpha) * dest)
          * Alpha  = (1 * src) + (0           * dest)
          */
-        glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
+        glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, src_alpha, dst_alpha);
         break;
     }
     GL_CHECK_ERROR();
@@ -214,6 +217,8 @@ static void update_paletted_texture(HVIDEO hVideo, br_pixelmap *src, br_uint_32 
 
 static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t states, shader_data_model* model, GLuint tex_default) {
     br_boolean blending_on;
+    br_boolean keep_alpha;
+    float reflect = 0.0f;
 
     /* Only use the states we want (if valid). */
     states = state->valid & states;
@@ -316,6 +321,13 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
             if (!state->prim.colour_map->glow_checked) {
                 update_glow_texture(hVideo, state->prim.colour_map);
             }
+            if (!state->prim.colour_map->reflect_checked) {
+                br_pixelmap* src = state->prim.colour_map->source;
+                state->prim.colour_map->reflect_checked = BR_TRUE;
+                state->prim.colour_map->reflect = hVideo->textureReflect != NULL && src != NULL && src->identifier != NULL
+                    ? hVideo->textureReflect(src->identifier) : 0.0f;
+            }
+            reflect = state->prim.colour_map->reflect;
             if (state->prim.colour_map->glow_tex != 0 && state->prim.colour_map->glow_intensity > 0.0f) {
                 glActiveTexture(GL_TEXTURE1);
                 glBindTexture(GL_TEXTURE_2D, state->prim.colour_map->glow_tex);
@@ -376,7 +388,13 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
             glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, maxAnisotropy);
 
         blending_on = (state->prim.flags & PRIMF_BLEND) || (state->prim.colour_map != NULL && state->prim.colour_map->blended);
+        /*
+         * The glow attachment's alpha (of a post-processed view) is a mask of the mirroring surfaces, stored as
+         * 1 - reflect: opaque draws write theirs, blended ones leave it (their output alpha only blends the glow)
+         */
+        keep_alpha = hVideo->post.active && hVideo->post.glowTex != 0;
         fade = hVideo->distanceFade != NULL ? hVideo->distanceFade() : 0.0f;
+        glUniform1f(hVideo->brenderProgram.uniforms.surface_reflect, blending_on || fade > 0.0f ? -1.0f : reflect);
         glUniform1f(hVideo->brenderProgram.uniforms.distance_fade, fade);
         if (hVideo->sceneSurface != NULL) {
             /* it can change within a scene (off for the sky) */
@@ -395,13 +413,13 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
         if (blending_on) {
             glEnable(GL_BLEND);
             model->alpha = state->prim.alpha_val / 255.0f;
-            apply_blend_mode(state);
+            apply_blend_mode(state, keep_alpha);
             glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
         } else if (fade > 0.0f) {
             /* Opaque, fading out with distance: output alpha is the fade, so blend instead of using it as
              * colour-key coverage (cut-outs are then discarded, per sample when supersampling) */
             glEnable(GL_BLEND);
-            glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
+            glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, keep_alpha ? GL_ZERO : GL_ONE, keep_alpha ? GL_ONE : GL_ZERO);
             model->alpha = 1.0f;
             glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
         } else {

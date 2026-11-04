@@ -7,7 +7,7 @@ precision highp float;
 ##endif
 
 // Post-processing of a view (see post.c), in this order: heat shimmer, depth of field, ambient occlusion,
-// speed blur, glow (bloom and light streaks), colour grading
+// ice and wet ground, speed blur, glow (bloom and light streaks), colour grading
 uniform sampler2D uColour;
 uniform sampler2D uDepth;
 uniform sampler2D uGlow;
@@ -36,6 +36,11 @@ uniform int uShimmerCount;
 uniform vec4 uShimmers[MAX_SHIMMERS];
 // colour grading: strength, night
 uniform vec2 uGrade;
+// wet ground: strength of the reflections of the glowing lights, 0 for none; the world's up in view space
+uniform float uWet;
+uniform vec3 uUp;
+// ice: strength of its mirror image (of the scene), 0 for none
+uniform float uIce;
 
 out vec4 fragColour;
 
@@ -123,6 +128,150 @@ float ambientOcclusion(vec2 p) {
     return sum / max(weight, 0.0001);
 }
 
+vec3 viewPosition(vec2 px) {
+    float z = linearDepth(texelFetch(uDepth, ivec2(px), 0).r);
+    vec2 ndc = (px - uView.xy) / uView.zw * 2.0 - 1.0;
+    return vec3(ndc.x * z / uProj.x, ndc.y * z / uProj.y, -z);
+}
+
+vec2 toWindow(vec3 v) {
+    return uView.xy + (vec2(v.x * uProj.x, v.y * uProj.y) / -v.z * 0.5 + 0.5) * uView.zw;
+}
+
+// The reflection of the ray from view space point P (window pixel p) in direction `ray`, by marching through
+// the depth: the window position where it meets a surface, or x < 0 for none (it left the view, or met only
+// the sky). Behind something in front (a car) it carries on, so reflections don't stop at its outline;
+// `to_sky` tells whether, without meeting anything, it went only in front of the sky at the end (so it would
+// show the sky), rather than behind anything or out of the view in front of something else
+vec2 traceReflection(vec3 P, vec3 ray, vec2 p, out bool to_sky) {
+    bool hidden = false;
+    bool over_sky = false;
+    to_sky = false;
+    float dist = -P.z;
+    // a little above the surface, so it doesn't hit itself; steps growing with the distance travelled
+    vec3 q = P + uUp * (0.01 + 0.004 * dist);
+    float step_len = 0.03 + 0.02 * dist;
+    float jitter = fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+    q += ray * step_len * jitter;
+    vec3 prev = q;
+    for (int i = 0; i < 28; i++) {
+        prev = q;
+        q += ray * step_len;
+        step_len *= 1.15;
+        if (q.z > -uNear) {
+            break;
+        }
+        vec2 s = toWindow(q);
+        if (s.x < uView.x || s.y < uView.y || s.x >= uView.x + uView.z || s.y >= uView.y + uView.w) {
+            break;
+        }
+        float ds = texelFetch(uDepth, ivec2(s), 0).r;
+        over_sky = ds >= 1.0;
+        float zs = linearDepth(ds);
+        float behind = -q.z - zs;
+        hidden = hidden || behind > 0.0;
+        if (behind > 0.0 && behind < step_len * 1.5 + 0.02 * zs) {
+            // refine between the last two points
+            vec3 a = prev;
+            vec3 b = q;
+            for (int k = 0; k < 4; k++) {
+                vec3 m = (a + b) * 0.5;
+                float zm = linearDepth(texelFetch(uDepth, ivec2(toWindow(m)), 0).r);
+                if (-m.z > zm) {
+                    b = m;
+                } else {
+                    a = m;
+                }
+            }
+            return toWindow(b);
+        }
+    }
+    to_sky = !hidden && over_sky;
+    return vec2(-1.0);
+}
+
+// fade out towards the edges of the view, where the ray could as well have left it
+float edgeFade(vec2 hit) {
+    vec2 e = min(hit - uView.xy, uView.xy + uView.zw - hit) / (0.08 * uView.w);
+    return clamp(min(e.x, e.y), 0.0, 1.0);
+}
+
+// how flat (facing up) the surface at P is, by the normal from the neighbouring depths (the smaller steps)
+float flatGround(vec2 p, vec3 P) {
+    vec3 r = viewPosition(p + vec2(1.0, 0.0)) - P;
+    vec3 l = P - viewPosition(p - vec2(1.0, 0.0));
+    vec3 u = viewPosition(p + vec2(0.0, 1.0)) - P;
+    vec3 d = P - viewPosition(p - vec2(0.0, 1.0));
+    vec3 n = normalize(cross(abs(r.z) < abs(l.z) ? r : l, abs(u.z) < abs(d.z) ? u : d));
+    return smoothstep(0.88, 0.97, abs(dot(n, uUp)));
+}
+
+// Wet ground: the surfaces facing up reflect what glows (lights, neon, lit windows, car lights) as a mirror
+// would, stretched and softened towards the viewer as on wet asphalt, and stronger at grazing angles
+vec3 wetGround(vec2 p, vec2 size) {
+    if (texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
+        return vec3(0.0);
+    }
+    vec3 P = viewPosition(p);
+    float flat_ground = flatGround(p, P);
+    if (flat_ground <= 0.0) {
+        return vec3(0.0);
+    }
+    vec3 v = normalize(P);
+    bool to_sky;
+    vec2 hit = traceReflection(P, reflect(v, uUp), p, to_sky);
+    if (hit.x < 0.0) {
+        return vec3(0.0);
+    }
+    vec3 sum = vec3(0.0);
+    float stretch = 0.004 * uView.w;
+    for (int k = -3; k <= 3; k++) {
+        float w = 1.0 - abs(float(k)) / 4.0;
+        sum += textureLod(uGlow, (hit + vec2(0.0, float(k) * stretch)) / size, 1.5).rgb * w;
+    }
+    sum /= 4.0;
+    float grazing = 1.0 - max(dot(-v, uUp), 0.0);
+    float fresnel = 0.15 + 0.85 * grazing * grazing * grazing;
+    return sum * fresnel * flat_ground * edgeFade(hit) * uWet;
+}
+
+// Ice (the mirroring surfaces, masked in the glow's alpha as 1 - how much): a soft mirror image of the scene,
+// or of the sky where the reflection only meets that; more at grazing angles
+vec3 ice(vec2 p, vec2 size, vec3 c) {
+    float amount = 1.0 - textureLod(uGlow, p / size, 0.0).a;
+    if (amount <= 0.01 || texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
+        return c;
+    }
+    vec3 P = viewPosition(p);
+    vec3 v = normalize(P);
+    vec3 ray = reflect(v, uUp);
+    bool to_sky;
+    vec2 hit = traceReflection(P, ray, p, to_sky);
+    float fade;
+    if (hit.x < 0.0) {
+        if (!to_sky) {
+            // it went behind something (a car on the ice), or out of the view before meeting what it would show
+            return c;
+        }
+        // the sky in that direction, if it shows there
+        vec3 far_point = ray * 1000.0;
+        hit = far_point.z < 0.0 ? toWindow(far_point) : vec2(-1.0);
+        if (hit.x < uView.x || hit.y < uView.y || hit.x >= uView.x + uView.z || hit.y >= uView.y + uView.w
+            || texelFetch(uDepth, ivec2(hit), 0).r < 1.0) {
+            return c;
+        }
+    }
+    fade = edgeFade(hit);
+    // a little soft: ice isn't a perfect mirror
+    vec2 t = 3.0 * uScale / size;
+    vec3 r = (texture(uColour, hit / size).rgb * 2.0 + texture(uColour, hit / size + vec2(t.x, 0.0)).rgb
+            + texture(uColour, hit / size - vec2(t.x, 0.0)).rgb + texture(uColour, hit / size + vec2(0.0, t.y)).rgb
+            + texture(uColour, hit / size - vec2(0.0, t.y)).rgb) / 6.0;
+    float grazing = 1.0 - max(dot(-v, uUp), 0.0);
+    float fresnel = 0.12 + 0.5 * grazing * grazing * grazing;
+    return mix(c, r, clamp(amount * fresnel * fade * uIce, 0.0, 1.0));
+}
+
 // hot air rising above fires: a wavy offset in a plume above each
 vec2 shimmer(vec2 p) {
     vec2 offset = vec2(0.0);
@@ -168,6 +317,12 @@ void main() {
         // up to 1 blends the occlusion in, above that it deepens (ao^strength)
         float shade = uAOStrength <= 1.0 ? mix(1.0, ao, uAOStrength) : pow(ao, uAOStrength);
         c *= mix(1.0, shade, 1.0 - lit);
+    }
+    if (uIce > 0.0) {
+        c = ice(p, size, c);
+    }
+    if (uWet > 0.0) {
+        c += wetGround(p, size);
     }
     if (uSpeed > 0.0) {
         // radial blur towards the edges of the view

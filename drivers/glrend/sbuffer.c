@@ -78,6 +78,8 @@ struct br_buffer_stored* BufferStoredGLAllocate(br_renderer* renderer, br_token 
     self->glow_tex = 0;
     self->glow_intensity = 0.0f;
     self->glow_checked = BR_FALSE;
+    self->reflect = 0.0f;
+    self->reflect_checked = BR_FALSE;
     self->templates = BrTVTemplateAllocate(self, (br_tv_template_entry*)bufferStoredTemplateEntries,
         BR_ASIZE(bufferStoredTemplateEntries));
 

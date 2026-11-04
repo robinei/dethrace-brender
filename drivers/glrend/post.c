@@ -14,6 +14,9 @@
  * - Speed blur: a radial blur towards the edges of the view.
  * - Glow: with glow enabled the 3d scenes also write their light sources (texels marked by the device's
  *   texture_glow callback) to a second attachment. Its mipmap chain makes a bloom and light streaks.
+ * - Ice mirrors the scene (and sky): the surfaces masked in the glow attachment's alpha (as 1 - how much, see
+ *   the texture_reflect callback), by a ray march through the depth.
+ * - Wet ground at night: up-facing surfaces reflect the glowing lights, found by a ray march through the depth.
  * - Colour grading.
  */
 #include "drv.h"
@@ -29,11 +32,13 @@
 enum {
     U_COLOUR, U_DEPTH, U_GLOW, U_AO, U_VIEW, U_PROJ, U_NEAR, U_FAR, U_TIME, U_SCALE, U_START, U_END, U_MAX_RADIUS,
     U_GLOW_STRENGTH, U_FLARE_STRENGTH, U_AO_STRENGTH, U_SPEED, U_SHIMMER_COUNT, U_SHIMMERS, U_GRADE, U_AO_DEPTH,
+    U_WET, U_UP, U_ICE,
     U_COUNT
 };
 static const char* uniform_names[U_COUNT] = {
     "uColour", "uDepth", "uGlow", "uAO", "uView", "uProj", "uNear", "uFar", "uTime", "uScale", "uStart", "uEnd",
-    "uMaxRadius", "uGlowStrength", "uFlareStrength", "uAOStrength", "uSpeed", "uShimmerCount", "uShimmers", "uGrade", "uAODepth"
+    "uMaxRadius", "uGlowStrength", "uFlareStrength", "uAOStrength", "uSpeed", "uShimmerCount", "uShimmers", "uGrade", "uAODepth",
+    "uWet", "uUp", "uIce"
 };
 enum {
     A_DEPTH, A_VIEW, A_PROJ, A_NEAR, A_FAR, A_RADIUS, A_AO, A_PASS,
@@ -359,6 +364,9 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
         glUniform4fv(u[U_SHIMMERS], params->shimmer_count < 8 ? params->shimmer_count : 8, params->shimmers);
     }
     glUniform2f(u[U_GRADE], params->grade, params->night);
+    glUniform1f(u[U_WET], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->wet : 0.0f);
+    glUniform3fv(u[U_UP], 1, params->up);
+    glUniform1f(u[U_ICE], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->ice : 0.0f);
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
     glBindVertexArray(0);

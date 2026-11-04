@@ -94,6 +94,9 @@ uniform bool alpha_to_coverage;
 // Glow mask of the texture (light source texels) and its strength; 0 for none
 uniform sampler2D glow_texture;
 uniform float glow_intensity;
+// How much this surface mirrors its surroundings (ice), written to the glow attachment's alpha as 1 - it for
+// the post-processing; below 0 when blending (the alpha then blends the glow, and the mask is left alone)
+uniform float surface_reflect;
 // Night: the scene is darkened to scene_brightness, except for light source texels, and lit by lights (car
 // headlights, fires) in view space: position + range, direction (zero for a point light) + strength,
 // colour + haze
@@ -103,6 +106,9 @@ uniform int num_spots;
 uniform vec4 spots[3 * MAX_SPOTS];
 // how much the lights light this fragment; also lifts the darkness depth cue
 vec3 spotLight = vec3(0.0);
+// flashes (lights with a negative haze: sparks, fires flaring up): they light beyond the daylight brightness,
+// so they show by day too
+vec3 flashLight = vec3(0.0);
 
 float spotCone(vec3 from_light, vec4 dir) {
     return dot(dir.xyz, dir.xyz) < 0.25 ? 1.0 : smoothstep(0.82, 0.95, dot(from_light, dir.xyz));
@@ -120,7 +126,12 @@ vec3 spotLighting(vec3 p, vec3 n) {
         vec3 l = to_light / max(d, 0.0001);
         float falloff = 1.0 - d / range;
         float facing = dot(n, n) > 0.01 ? max(dot(n, l), 0.0) * 0.8 + 0.2 : 1.0;
-        sum += spots[3 * i + 2].rgb * (spotCone(-l, spots[3 * i + 1]) * falloff * falloff * facing * spots[3 * i + 1].w);
+        vec3 c = spots[3 * i + 2].rgb * (spotCone(-l, spots[3 * i + 1]) * falloff * falloff * facing * spots[3 * i + 1].w);
+        if (spots[3 * i + 2].w < 0.0) {
+            flashLight += c;
+        } else {
+            sum += c;
+        }
     }
     return sum;
 }
@@ -346,7 +357,8 @@ float doDistanceFog() {
         float f = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
         if (fog_colour == vec3(0.0)) {
             // headlights reach into the darkness
-            f *= 1.0 - clamp(max(spotLight.r, max(spotLight.g, spotLight.b)), 0.0, 1.0);
+            vec3 l = spotLight + flashLight;
+            f *= 1.0 - clamp(max(l.r, max(l.g, l.b)), 0.0, 1.0);
         }
         fragColour.rgb = mix(fragColour.rgb, fog_colour * scene_brightness, f);
         return f;
@@ -426,6 +438,7 @@ void main() {
         fragColour.rgb *= surfaceShading(rawPosition, position.xyz, normal.xyz);
     }
 
+    vec3 flashColour = vec3(0.0);
     float glowMask = 0.0;
     if (glow_intensity > 0.0 && !disable_texture) {
         glowMask = texture(glow_texture, mappedUV).r * glow_intensity;
@@ -437,6 +450,8 @@ void main() {
         }
         // lit up to the normal (daylight) brightness, not beyond, so close bright surfaces don't blow out
         vec3 lit = fragColour.rgb * min(scene_brightness + spotLight, vec3(1.0));
+        flashColour = fragColour.rgb * flashLight;
+        lit += flashColour;
         fragColour.rgb = mix(lit, textureColour.rgb, clamp(glowMask, 0.0, 1.0) * (1.0 - scene_brightness));
         if (num_spots > 0) {
             fragColour.rgb *= blobShadow(position.xyz, normalize(normal.xyz));
@@ -490,5 +505,10 @@ void main() {
     if (glowMask > 0.0) {
         float hidden = fog * (fog_colour == vec3(0.0) ? 0.4 : 1.0);
         glowColour.rgb = textureColour.rgb * glowMask * (1.0 - hidden);
+    }
+    // what a flash lights glows a little too
+    glowColour.rgb += flashColour * 0.25 * (1.0 - fog);
+    if (surface_reflect >= 0.0) {
+        glowColour.a = 1.0 - surface_reflect * (dot(normal.xyz, normal.xyz) > 0.01 ? 1.0 : 0.0);
     }
 }

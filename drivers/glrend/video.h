@@ -27,6 +27,7 @@ typedef struct _VIDEO {
     br_device_gl_scenelighting_cbfn* sceneLighting;
     br_device_gl_scenesurface_cbfn* sceneSurface;
     br_device_gl_depthwrite_cbfn* depthWrite;
+    br_device_gl_texturereflect_cbfn* textureReflect;
     float sceneSurfaceUploaded[BR_GL_SCENE_SURFACE_FLOATS]; /* the scene_surface parameters last given to the shader */
 
     struct {
@@ -64,6 +65,7 @@ typedef struct _VIDEO {
             GLint distance_fade;     /* float */
             GLint glow_texture;      /* sampler2D */
             GLint glow_intensity;    /* float */
+            GLint surface_reflect;   /* float */
             GLint scene_brightness;  /* float */
             GLint num_spots;         /* int */
             GLint spots;             /* vec4[3 * MAX] */
