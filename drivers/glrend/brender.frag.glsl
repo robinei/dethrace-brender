@@ -102,6 +102,8 @@ uniform float surface_reflect;
 // which a blended draw fades out; 0 for off
 uniform sampler2D soft_depth;
 uniform float soft_distance;
+// Car wear (0 for none, up to 2): dirt and scratches on the paint as the car is damaged
+uniform float surface_wear;
 // Night: the scene is darkened to scene_brightness, except for light source texels, and lit by lights (car
 // headlights, fires) in view space: position + range, direction (zero for a point light) + strength,
 // colour + haze
@@ -224,6 +226,22 @@ float relief(vec3 p, vec3 n, vec2 uv) {
     }
     vec3 nb = normalize(abs(det) * n - sign(det) * (dhdx * r1 + dhdy * r2));
     return (dot(nb, surface_sun.xyz) - dot(n, surface_sun.xyz)) * fade;
+}
+
+// Car wear: patches of grime (darker, browner, duller) spreading with the wear, and fine scratches catching the
+// light, in the car's model space so they stay put on its body
+vec3 carWear(vec3 c, vec3 model_pos) {
+    float w = surface_wear;
+    float lo = 0.72 - 0.32 * min(w, 1.5);
+    float grime = smoothstep(lo, lo + 0.18, valueNoise(model_pos * 9.0) * 0.7 + valueNoise(model_pos * 31.0) * 0.3);
+    vec3 dirty = mix(c, vec3(dot(c, vec3(0.3, 0.59, 0.11))) * vec3(0.62, 0.52, 0.4), 0.75);
+    c = mix(c, dirty, grime * min(w, 1.0));
+    // scratches: thin streaks along a slanting direction, in short pieces
+    vec3 q = model_pos * 40.0;
+    float line = abs(fract(q.x * 0.8 + q.y * 0.35 + q.z * 0.6 + valueNoise(q * 0.08) * 3.0) - 0.5);
+    float piece = smoothstep(1.0 - 0.3 * min(w, 2.0), 1.05 - 0.3 * min(w, 2.0), valueNoise(q * 0.12 + 3.0));
+    float scratch = (1.0 - smoothstep(0.0, 0.07, line)) * piece;
+    return mix(c, vec3(0.62, 0.6, 0.57), scratch * 0.55 * min(w, 1.0));
 }
 
 vec3 surfaceShading(vec3 model_pos, vec3 p, vec3 vertex_n, vec2 uv) {
@@ -479,6 +497,10 @@ void main() {
     // not for the sprites)
     if ((surface_sun.w > 0.0 || surface_up.w > 0.0) && !disable_texture && dot(normal.xyz, normal.xyz) > 0.01) {
         fragColour.rgb *= surfaceShading(rawPosition, position.xyz, normal.xyz, mappedUV);
+    }
+
+    if (surface_wear > 0.0 && !disable_texture) {
+        fragColour.rgb = carWear(fragColour.rgb, rawPosition);
     }
 
     vec3 flashColour = vec3(0.0);

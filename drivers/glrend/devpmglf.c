@@ -244,6 +244,8 @@ br_device_pixelmap* DevicePixelmapGLAllocateFront(br_device* dev, br_output_faci
     self->asFront.video.textureGlow = pt.callbacks->texture_glow;
     self->asFront.video.glowScale = pt.callbacks->glow_scale;
     self->asFront.video.textureReflect = pt.callbacks->texture_reflect;
+    self->asFront.video.textureSlot = pt.callbacks->texture_slot;
+    self->asFront.video.slotWear = pt.callbacks->slot_wear;
     self->asFront.video.sceneLighting = pt.callbacks->scene_lighting;
     self->asFront.video.sceneSurface = pt.callbacks->scene_surface;
     self->asFront.video.depthWrite = pt.callbacks->depth_write;

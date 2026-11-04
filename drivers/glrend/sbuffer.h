@@ -68,6 +68,7 @@ typedef struct br_buffer_stored {
      */
     float reflect;
     br_boolean reflect_checked;
+    int wear_slot; /* see texture_slot, -1 for none */
 
     br_boolean paletted_source_dirty;
     br_uint_32 palette_revision;

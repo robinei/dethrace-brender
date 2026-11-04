@@ -53,6 +53,9 @@ typedef float BR_CALLBACK br_device_gl_glowscale_cbfn(int id);
 // Optional. How much the surfaces with this texture mirror their surroundings (eg. ice), 0 for not at all.
 // Asked once per texture, the first time it is drawn
 typedef float BR_CALLBACK br_device_gl_texturereflect_cbfn(const char *identifier);
+/* The wear slot of a texture (the car it belongs to), or -1; how worn that slot looks now (0..2: dirt, scratches) */
+typedef int BR_CALLBACK br_device_gl_textureslot_cbfn(const char *identifier);
+typedef float BR_CALLBACK br_device_gl_slotwear_cbfn(int slot);
 // Optional. Queried at the start of each scene, for the textured surfaces with normals: sets 16 floats,
 // the sun's direction (towards it) in view space and how much surfaces facing away from it darken (0 = none),
 // then the world's up in view space and how much a large scale brightness variation breaks up the tiled
@@ -81,6 +84,8 @@ typedef struct br_device_gl_callback_procs {
     br_device_gl_scenesurface_cbfn         *scene_surface;
     br_device_gl_depthwrite_cbfn           *depth_write;
     br_device_gl_texturereflect_cbfn       *texture_reflect;
+    br_device_gl_textureslot_cbfn          *texture_slot;
+    br_device_gl_slotwear_cbfn             *slot_wear;
     br_int_32                              fog_distance;    /* Non-zero: fog by distance, from fog_min to fully fogged at fog_max */
 } br_device_gl_callback_procs;
 

@@ -219,6 +219,7 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
     br_boolean blending_on;
     br_boolean keep_alpha;
     float reflect = 0.0f;
+    int wear_slot = -1;
 
     /* Only use the states we want (if valid). */
     states = state->valid & states;
@@ -326,8 +327,11 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
                 state->prim.colour_map->reflect_checked = BR_TRUE;
                 state->prim.colour_map->reflect = hVideo->textureReflect != NULL && src != NULL && src->identifier != NULL
                     ? hVideo->textureReflect(src->identifier) : 0.0f;
+                state->prim.colour_map->wear_slot = hVideo->textureSlot != NULL && src != NULL && src->identifier != NULL
+                    ? hVideo->textureSlot(src->identifier) : -1;
             }
             reflect = state->prim.colour_map->reflect;
+            wear_slot = state->prim.colour_map->wear_slot;
             if (state->prim.colour_map->glow_tex != 0 && state->prim.colour_map->glow_intensity > 0.0f) {
                 glActiveTexture(GL_TEXTURE1);
                 glBindTexture(GL_TEXTURE_2D, state->prim.colour_map->glow_tex);
@@ -398,6 +402,8 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
         glUniform1f(hVideo->brenderProgram.uniforms.surface_reflect,
                     fade > 0.0f || (blending_on && reflect <= 0.0f) ? -1.0f : reflect);
         glUniform1f(hVideo->brenderProgram.uniforms.distance_fade, fade);
+        glUniform1f(hVideo->brenderProgram.uniforms.surface_wear,
+                    wear_slot >= 0 && hVideo->slotWear != NULL ? hVideo->slotWear(wear_slot) : 0.0f);
         if (hVideo->post.active && hVideo->post.depthSnapshot && hVideo->post.drawSoftDistance > 0.0f) {
             glActiveTexture(GL_TEXTURE2);
             glBindTexture(GL_TEXTURE_2D, hVideo->post.aoDepthTex);
