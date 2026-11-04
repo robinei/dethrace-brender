@@ -112,6 +112,7 @@ typedef struct _VIDEO {
         GLuint normalTex; /* the surfaces' view space normals (and the sprites' mark), see brender.frag.glsl */
         GLuint aoFbo[2], aoTex[2]; /* ambient occlusion, half resolution (and a target for its blur) */
         GLuint aoDepthFbo, aoDepthTex; /* the depth snapshot the ambient occlusion uses, see BrGLPostProcessDepthSnapshot */
+        GLuint litFbo, litTex; /* the lit scene, for the blurs (made when first needed), see BrGLPostProcessEnd */
         int depthSnapshot;
         float softDistance; /* soft particles: what is drawn fades out this close to the snapshot depth, 0 for off */
         float drawSoftDistance; /* that of the models being drawn (kept in their state, see state_stack) */

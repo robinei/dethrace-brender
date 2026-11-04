@@ -34,7 +34,7 @@
 enum {
     U_COLOUR, U_DEPTH, U_GLOW, U_AO, U_VIEW, U_PROJ, U_NEAR, U_FAR, U_TIME, U_SCALE, U_START, U_END, U_MAX_RADIUS,
     U_GLOW_STRENGTH, U_FLARE_STRENGTH, U_AO_STRENGTH, U_SPEED, U_SHIMMER_COUNT, U_SHIMMERS, U_GRADE, U_AO_DEPTH,
-    U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN, U_SHADOW_MAP, U_SHADOW_PROJ, U_SHADOW_VIEW, U_SHADOW_TEXEL, U_SUN_SHADING, U_NORMAL, U_SPECULAR, U_SUN_DIR,
+    U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN, U_SHADOW_MAP, U_SHADOW_PROJ, U_SHADOW_VIEW, U_SHADOW_TEXEL, U_SUN_SHADING, U_NORMAL, U_SPECULAR, U_SUN_DIR, U_STAGE,
     U_COUNT
 };
 /* (they must fit hVideo->post.uniforms) */
@@ -42,7 +42,7 @@ typedef char post_uniforms_fit[U_COUNT <= 64 ? 1 : -1];
 static const char* uniform_names[U_COUNT] = {
     "uColour", "uDepth", "uGlow", "uAO", "uView", "uProj", "uNear", "uFar", "uTime", "uScale", "uStart", "uEnd",
     "uMaxRadius", "uGlowStrength", "uFlareStrength", "uAOStrength", "uSpeed", "uShimmerCount", "uShimmers", "uGrade", "uAODepth",
-    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun", "uShadowMap", "uShadowProj", "uShadowView", "uShadowTexel", "uSunShading", "uNormal", "uSpecular", "uSunDir"
+    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun", "uShadowMap", "uShadowProj", "uShadowView", "uShadowTexel", "uSunShading", "uNormal", "uSpecular", "uSunDir", "uStage"
 };
 enum {
     W_TO_WORLD, W_VIEW, W_PROJ, W_SIZE, W_TIME, W_SCALE, W_RAIN, W_BOX, W_DEPTH, W_NEAR, W_FAR, W_BRIGHTNESS, W_AMOUNT,
@@ -74,6 +74,9 @@ static void delete_targets(HVIDEO hVideo) {
     glDeleteTextures(2, hVideo->post.aoTex);
     glDeleteFramebuffers(1, &hVideo->post.aoDepthFbo);
     glDeleteTextures(1, &hVideo->post.aoDepthTex);
+    glDeleteFramebuffers(1, &hVideo->post.litFbo);
+    glDeleteTextures(1, &hVideo->post.litTex);
+    hVideo->post.litFbo = hVideo->post.litTex = 0;
     hVideo->post.aoDepthFbo = hVideo->post.aoDepthTex = 0;
     hVideo->post.msaaFbo = hVideo->post.msaaColour = hVideo->post.msaaGlow = hVideo->post.msaaDepth = 0;
     hVideo->post.resolveFbo = hVideo->post.colourTex = hVideo->post.glowTex = hVideo->post.depthTex = 0;
@@ -329,6 +332,7 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     br_device_pixelmap* self = (br_device_pixelmap*)screen;
     HVIDEO hVideo;
     GLboolean sample_shading;
+    int split;
     GLint* u;
     GLint* a;
     int w, h, ao;
@@ -488,8 +492,45 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glActiveTexture(GL_TEXTURE0);
     glUniform1i(u[U_NORMAL], 8);
     glUniform1f(u[U_PAINT], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->paint : 0.0f);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
-    draw_weather(hVideo, params, w, h);
+    /*
+     * With the depth of field or the speed blur, in two: the lit scene (and the weather) into litTex, then the
+     * blurs and the rest from it, so what is blurred includes the shadows, reflections and the weather
+     */
+    split = params->dof_max_radius > 0.0f || params->speed > 0.0f;
+    if (split && hVideo->post.litTex == 0) {
+        hVideo->post.litTex = create_texture(GL_RGBA16F, w, h, GL_RGBA, GL_HALF_FLOAT, GL_LINEAR, 1);
+        glGenFramebuffers(1, &hVideo->post.litFbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.litFbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, hVideo->post.litTex, 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            BR_WARNING0("GLREND: post-processing lit scene framebuffer incomplete");
+            glDeleteFramebuffers(1, &hVideo->post.litFbo);
+            glDeleteTextures(1, &hVideo->post.litTex);
+            hVideo->post.litFbo = hVideo->post.litTex = 0;
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+    split = split && hVideo->post.litTex != 0;
+    if (split) {
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.litFbo);
+        glUniform1i(u[U_STAGE], 1);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        draw_weather(hVideo, params, w, h);
+        glUseProgram(hVideo->post.program);
+        glBindVertexArray(self->asFront.screen_buffer_vao);
+        glDisable(GL_BLEND);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, hVideo->post.litTex);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        /* (the depth for the depth of field: unit 1 still) */
+        glUniform1i(u[U_STAGE], 2);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+    } else {
+        glUniform1i(u[U_STAGE], 0);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        draw_weather(hVideo, params, w, h);
+    }
 
     glBindVertexArray(0);
     glActiveTexture(GL_TEXTURE8);

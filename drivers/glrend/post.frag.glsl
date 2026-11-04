@@ -9,6 +9,9 @@ precision highp float;
 // Post-processing of a view (see post.c), in this order: heat shimmer, depth of field, ambient occlusion,
 // ice, water and wet ground, speed blur, glow (bloom and light streaks), colour grading
 uniform sampler2D uColour;
+// 0: all in one; 1: the lit scene only (into a texture, see post.c), 2: the rest, with uColour that lit scene
+// (mipmapped), so the depth of field and the speed blur blur the shadows and reflections with everything else
+uniform int uStage;
 uniform sampler2D uDepth;
 uniform sampler2D uGlow;
 uniform sampler2D uAO;
@@ -64,7 +67,7 @@ uniform sampler2D uNormal;
 
 out vec4 fragColour;
 
-const int TAPS = 48;
+const int TAPS = 96;
 const float GOLDEN_ANGLE = 2.39996323;
 
 float linearDepth(float d) {
@@ -79,21 +82,38 @@ float blur(vec2 p) {
     return clamp((linearDepth(d) - uStart) / max(uEnd - uStart, 0.0001), 0.0, 1.0);
 }
 
+// Depth of field, of the far distance only (nothing nearer is blurred, so nothing blurs over what is sharp): a
+// gather of the samples around whose blur reaches the pixel, each spread over its blur's area (as a scatter
+// would), on a spiral turned per pixel. Only blurred pixels pay, as many taps as their blur's area needs
+float blurRadius(vec2 q) {
+    return blur(q) * uMaxRadius;
+}
+
 vec3 dof(vec2 p, vec2 size) {
     vec3 centre = texelFetch(uColour, ivec2(p), 0).rgb;
-    float radius = uMaxRadius > 0.0 ? blur(p) * uMaxRadius : 0.0;
+    if (uMaxRadius <= 0.0) {
+        return centre;
+    }
+    float radius = blurRadius(p);
     if (radius < 0.5) {
         return centre;
     }
-    vec3 sum = centre;
-    float weight = 1.0;
-    for (int i = 0; i < TAPS; i++) {
-        float r = sqrt((float(i) + 0.5) / float(TAPS)) * radius;
-        float a = float(i) * GOLDEN_ANGLE;
+    bool background = texelFetch(uDepth, ivec2(p), 0).r >= 1.0;
+    float turn = 6.2831853 * fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+    // the background (sky) is the most blurred but smooth: fewer taps, from a smaller mip of the lit scene
+    int taps = background ? 24 : clamp(int(radius * radius * 1.6) + 8, 12, TAPS);
+    float lod = background ? max(0.0, log2(radius / 4.0)) : 0.0;
+    float own = 1.0 / max(radius * radius, 1.0);
+    vec3 sum = centre * own;
+    float weight = own;
+    for (int i = 0; i < taps; i++) {
+        float r = sqrt((float(i) + 0.5) / float(taps)) * radius;
+        float a = float(i) * GOLDEN_ANGLE + turn;
         vec2 q = p + r * vec2(cos(a), sin(a));
+        float qr = blurRadius(q);
         // only samples blurred enough to reach this pixel: sharp nearer things don't bleed out
-        float w = clamp(blur(q) * uMaxRadius - r + 1.0, 0.0, 1.0);
-        sum += texture(uColour, q / size).rgb * w;
+        float w = clamp(qr - r + 1.0, 0.0, 1.0) / max(qr * qr, 1.0);
+        sum += textureLod(uColour, q / size, lod).rgb * w;
         weight += w;
     }
     return sum / weight;
@@ -659,13 +679,9 @@ vec3 grade(vec3 c) {
     return clamp(c, 0.0, 1.0);
 }
 
-void main() {
-    vec2 size = vec2(textureSize(uColour, 0));
-    vec2 p = gl_FragCoord.xy;
-    if (uShimmerCount > 0) {
-        p = clamp(p + shimmer(p), vec2(0.5), size - 0.5);
-    }
-    vec3 c = dof(p, size);
+// The scene lit: ambient occlusion, the sun's shadows and highlights, reflections, wet ground
+vec3 litScene(vec2 p, vec2 size) {
+    vec3 c = texelFetch(uColour, ivec2(p), 0).rgb;
     if (uAOStrength > 0.0) {
         float ao = ambientOcclusion(p);
         // light sources aren't occluded
@@ -688,6 +704,25 @@ void main() {
     }
     if (uWet > 0.0) {
         c += wetGround(p, size);
+    }
+    return c;
+}
+
+void main() {
+    vec2 size = vec2(textureSize(uColour, 0));
+    vec2 p = gl_FragCoord.xy;
+    vec3 c;
+    if (uStage == 2) {
+        c = dof(p, size);
+    } else {
+        if (uShimmerCount > 0) {
+            p = clamp(p + shimmer(p), vec2(0.5), size - 0.5);
+        }
+        c = litScene(p, size);
+        if (uStage == 1) {
+            fragColour = vec4(c, 1.0);
+            return;
+        }
     }
     if (uSpeed > 0.0) {
         // radial blur towards the edges of the view
