@@ -378,7 +378,8 @@ void main() {
     vec2 mappedUV = SurfaceMap(rawPosition, rawNormal, uv);
 
     if (disable_texture) {
-        textureColour = surface_colour;
+        // Lit, non-prelit vertices already include the material colour.
+        textureColour = (lighting == 1u && prelit == 0u) ? vec4(1.0) : surface_colour;
     } else {
         if (sharp_filter) {
             // Anti-aliased nearest: flat texels, with a bilinear blend only in a ~1 screen pixel band
