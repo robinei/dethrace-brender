@@ -119,7 +119,7 @@ typedef struct _VIDEO {
         int sprites; /* what is drawn is sprites, see BrGLSprites */
         int drawSprite; /* the model being drawn is (kept in its state) */
         GLuint program, aoProgram;
-        GLint uniforms[32], aoUniforms[8];
+        GLint uniforms[64], aoUniforms[8]; /* (see the uniform lists in post.c) */
         GLuint weatherProgram; /* snow and rain particles, see weather.vert.glsl */
         GLint weatherUniforms[16];
         /* the view: the largest perspective scene drawn while active */
