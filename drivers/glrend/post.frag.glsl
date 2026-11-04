@@ -750,7 +750,8 @@ vec3 lampHaze(vec2 p) {
         float below = 0.35 + 0.65 * smoothstep(-0.2, 0.7, dot(q, -uUp) / max(d, 0.0001));
         sum += uLamps[2 * i + 1].rgb * (uLamps[2 * i + 1].w * 0.02 * reach * scatter * fade * fade * below);
     }
-    return sum;
+    // (easing off as it adds up, where many lamps are together, rather than burning out to white)
+    return 0.6 * (1.0 - exp(-sum / 0.6));
 }
 
 // The scene lit: ambient occlusion, the sun's shadows and highlights, reflections, wet ground
