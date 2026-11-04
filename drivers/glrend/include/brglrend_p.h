@@ -36,7 +36,7 @@ typedef struct br_gl_post_params {
     float paint;                /* glossy car paint (texture_reflect 0.25, needs glow), 0 disables */
     float weather[3];           /* snow or rain: 1 for rain (else snow), the amount (0 for none), their brightness */
     float sun[4];               /* sun shadows: the sun's direction in view space, and their strength (0 disables) */
-    float shadow_view[12];      /* world to the shadow map's camera, as a br_matrix34 (used if the map was drawn) */
+    float shadow_view[3 * 12];  /* world to the shadow maps' cameras, as br_matrix34s (used if a map was drawn) */
     float sun_shading;          /* the strength of the scenes' sun shading (scene_surface), which the shadows match */
     int shimmer_count;          /* heat shimmer above these points: view space position and strength, up to 8 */
     float shimmers[4 * 8];
@@ -44,10 +44,11 @@ typedef struct br_gl_post_params {
 
 br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap *screen, br_boolean glow);
 void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap *screen, const br_gl_post_params *params);
-/* The sun's shadow map: the scenes drawn between Begin and End (with a parallel camera at the sun) only write
- * its depth, size x size; translucent draws are left out. The post-processing then shades by it (see
- * br_gl_post_params.shadow_view) */
-br_error BR_PUBLIC_ENTRY BrGLShadowPassBegin(br_pixelmap *screen, int size);
+/* The sun's shadow maps (up to 3 levels, cascaded: each covers more than the one before): the scenes drawn
+ * between Begin and End (with a parallel camera at the sun) only write the depth of that level's map, size x
+ * size; translucent draws are left out. The post-processing then shades by them (see
+ * br_gl_post_params.shadow_view), the first level that covers a point taking precedence */
+br_error BR_PUBLIC_ENTRY BrGLShadowPassBegin(br_pixelmap *screen, int size, int level);
 /* What is drawn while on is sprites (flat cards facing the camera), which the sun shadows treat as such */
 void BR_PUBLIC_ENTRY BrGLSprites(br_pixelmap *screen, int on);
 void BR_PUBLIC_ENTRY BrGLShadowPassEnd(br_pixelmap *screen);

@@ -96,10 +96,11 @@ typedef struct _VIDEO {
     /* The sun's shadow map (see BrGLShadowPassBegin): the scenes drawn while active only write its depth */
     struct {
         int active;
-        int valid; /* drawn this frame */
-        int size;
-        GLuint fbo, tex;
-        float proj[16]; /* the projection it was drawn with (GL) */
+        int level; /* the one being drawn */
+        int valid[3]; /* drawn this frame */
+        int size[3];
+        GLuint fbo[3], tex[3];
+        float proj[3][16]; /* the projections they were drawn with (GL) */
         int skip; /* the group being drawn doesn't cast a shadow (translucent) */
     } shadow;
 

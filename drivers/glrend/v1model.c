@@ -533,8 +533,8 @@ void StoredGLRenderGroup(br_geometry_stored* self, br_renderer* renderer, const 
         if (hVideo->shadow.skip) {
             return;
         }
-        memcpy(hVideo->shadow.proj, &cache->model.p, sizeof(hVideo->shadow.proj));
-        hVideo->shadow.valid = 1;
+        memcpy(hVideo->shadow.proj[hVideo->shadow.level], &cache->model.p, sizeof(hVideo->shadow.proj[0]));
+        hVideo->shadow.valid[hVideo->shadow.level] = 1;
     }
     glBufferData(GL_UNIFORM_BUFFER, sizeof(model), &model, GL_STATIC_DRAW);
     glDrawElements(GL_TRIANGLES, groupinfo->count, GL_UNSIGNED_SHORT, groupinfo->offset);

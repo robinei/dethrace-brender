@@ -163,9 +163,9 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
     if (hVideo->shadow.active) {
         /* the sun's shadow map: only its depth, pushed back a little against the shadow acne of the faces
          * themselves */
-        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->shadow.fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->shadow.fbo[hVideo->shadow.level]);
         glDrawBuffer(GL_NONE);
-        glViewport(0, 0, hVideo->shadow.size, hVideo->shadow.size);
+        glViewport(0, 0, hVideo->shadow.size[hVideo->shadow.level], hVideo->shadow.size[hVideo->shadow.level]);
         glDisable(GL_SCISSOR_TEST);
         glEnable(GL_POLYGON_OFFSET_FILL);
         glPolygonOffset(1.5f, 2.0f);

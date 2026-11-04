@@ -438,24 +438,34 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glUniform1f(u[U_WATER], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->water : 0.0f);
     glUniform3fv(u[U_TO_WORLD], 4, params->to_world);
     glUniform4fv(u[U_SUN], 1, params->sun);
-    /* the sun's shadow map, if drawn this frame */
-    glActiveTexture(GL_TEXTURE5);
-    glBindTexture(GL_TEXTURE_2D, hVideo->shadow.valid ? hVideo->shadow.tex : 0);
-    glActiveTexture(GL_TEXTURE0);
-    glUniform1i(u[U_SHADOW_MAP], 5);
-    glUniformMatrix4fv(u[U_SHADOW_PROJ], 1, GL_FALSE, hVideo->shadow.proj);
-    glUniform3fv(u[U_SHADOW_VIEW], 4, params->shadow_view);
+    /* the sun's shadow maps, those drawn this frame */
+    {
+        static const GLint units[3] = { 5, 6, 7 };
+        float texels[3];
+        int level;
+        for (level = 0; level < 3; level++) {
+            glActiveTexture(GL_TEXTURE5 + level);
+            glBindTexture(GL_TEXTURE_2D, hVideo->shadow.valid[level] ? hVideo->shadow.tex[level] : 0);
+            texels[level] = hVideo->shadow.valid[level] && hVideo->shadow.size[level] > 0 ? 1.0f / hVideo->shadow.size[level] : 0.0f;
+        }
+        glActiveTexture(GL_TEXTURE0);
+        glUniform1iv(u[U_SHADOW_MAP], 3, units);
+        glUniformMatrix4fv(u[U_SHADOW_PROJ], 3, GL_FALSE, &hVideo->shadow.proj[0][0]);
+        glUniform3fv(u[U_SHADOW_VIEW], 12, params->shadow_view);
+        glUniform1fv(u[U_SHADOW_TEXEL], 3, texels);
+    }
     glUniform1f(u[U_SUN_SHADING], params->sun_shading);
     glUniform1f(u[U_HAS_GLOW], hVideo->post.glowTex != 0 ? 1.0f : 0.0f);
-    glUniform1f(u[U_SHADOW_TEXEL], hVideo->shadow.valid && hVideo->shadow.size > 0 ? 1.0f / hVideo->shadow.size : 0.0f);
     glUniform1f(u[U_PAINT], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->paint : 0.0f);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     draw_weather(hVideo, params, w, h);
 
     glBindVertexArray(0);
-    glActiveTexture(GL_TEXTURE5);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    hVideo->shadow.valid = 0;
+    for (int level = 2; level >= 0; level--) {
+        glActiveTexture(GL_TEXTURE5 + level);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        hVideo->shadow.valid[level] = 0;
+    }
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE2);
@@ -512,12 +522,12 @@ void BR_PUBLIC_ENTRY BrGLPostProcessSoftParticles(br_pixelmap* screen, float dis
     self->asFront.video.post.softDistance = distance;
 }
 
-br_error BR_PUBLIC_ENTRY BrGLShadowPassBegin(br_pixelmap* screen, int size) {
+br_error BR_PUBLIC_ENTRY BrGLShadowPassBegin(br_pixelmap* screen, int size, int level) {
     br_device_pixelmap* self = (br_device_pixelmap*)screen;
     HVIDEO hVideo;
     GLint max_size;
 
-    if (self == NULL || self->screen != self) {
+    if (self == NULL || self->screen != self || level < 0 || level >= 3) {
         return BRE_FAIL;
     }
     hVideo = &self->asFront.video;
@@ -525,37 +535,38 @@ br_error BR_PUBLIC_ENTRY BrGLShadowPassBegin(br_pixelmap* screen, int size) {
     if (size > max_size) {
         size = max_size;
     }
-    if (hVideo->shadow.fbo == 0 || hVideo->shadow.size != size) {
-        if (hVideo->shadow.fbo != 0) {
-            glDeleteFramebuffers(1, &hVideo->shadow.fbo);
-            glDeleteTextures(1, &hVideo->shadow.tex);
+    if (hVideo->shadow.fbo[level] == 0 || hVideo->shadow.size[level] != size) {
+        if (hVideo->shadow.fbo[level] != 0) {
+            glDeleteFramebuffers(1, &hVideo->shadow.fbo[level]);
+            glDeleteTextures(1, &hVideo->shadow.tex[level]);
         }
         /* (its depths are read and compared in the post pass, which filters them itself) */
-        hVideo->shadow.tex = create_texture(GL_DEPTH_COMPONENT24, size, size, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, GL_NEAREST, 0);
-        glBindTexture(GL_TEXTURE_2D, hVideo->shadow.tex);
+        hVideo->shadow.tex[level] = create_texture(GL_DEPTH_COMPONENT24, size, size, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, GL_NEAREST, 0);
+        glBindTexture(GL_TEXTURE_2D, hVideo->shadow.tex[level]);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glBindTexture(GL_TEXTURE_2D, 0);
-        glGenFramebuffers(1, &hVideo->shadow.fbo);
-        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->shadow.fbo);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, hVideo->shadow.tex, 0);
+        glGenFramebuffers(1, &hVideo->shadow.fbo[level]);
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->shadow.fbo[level]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, hVideo->shadow.tex[level], 0);
         glDrawBuffer(GL_NONE);
         glReadBuffer(GL_NONE);
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            glDeleteFramebuffers(1, &hVideo->shadow.fbo);
-            glDeleteTextures(1, &hVideo->shadow.tex);
-            hVideo->shadow.fbo = hVideo->shadow.tex = 0;
+            glDeleteFramebuffers(1, &hVideo->shadow.fbo[level]);
+            glDeleteTextures(1, &hVideo->shadow.tex[level]);
+            hVideo->shadow.fbo[level] = hVideo->shadow.tex[level] = 0;
             return BRE_FAIL;
         }
-        hVideo->shadow.size = size;
+        hVideo->shadow.size[level] = size;
     }
-    glBindFramebuffer(GL_FRAMEBUFFER, hVideo->shadow.fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, hVideo->shadow.fbo[level]);
     glDepthMask(GL_TRUE);
     glClear(GL_DEPTH_BUFFER_BIT);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     hVideo->shadow.active = 1;
-    hVideo->shadow.valid = 0;
+    hVideo->shadow.level = level;
+    hVideo->shadow.valid[level] = 0;
     GL_CHECK_ERROR();
     return BRE_OK;
 }
