@@ -34,13 +34,13 @@
 enum {
     U_COLOUR, U_DEPTH, U_GLOW, U_AO, U_VIEW, U_PROJ, U_NEAR, U_FAR, U_TIME, U_SCALE, U_START, U_END, U_MAX_RADIUS,
     U_GLOW_STRENGTH, U_FLARE_STRENGTH, U_AO_STRENGTH, U_SPEED, U_SHIMMER_COUNT, U_SHIMMERS, U_GRADE, U_AO_DEPTH,
-    U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN, U_SHADOW_MAP, U_SHADOW_PROJ, U_SHADOW_VIEW, U_SHADOW_TEXEL,
+    U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN, U_SHADOW_MAP, U_SHADOW_PROJ, U_SHADOW_VIEW, U_SHADOW_TEXEL, U_SUN_SHADING, U_HAS_GLOW,
     U_COUNT
 };
 static const char* uniform_names[U_COUNT] = {
     "uColour", "uDepth", "uGlow", "uAO", "uView", "uProj", "uNear", "uFar", "uTime", "uScale", "uStart", "uEnd",
     "uMaxRadius", "uGlowStrength", "uFlareStrength", "uAOStrength", "uSpeed", "uShimmerCount", "uShimmers", "uGrade", "uAODepth",
-    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun", "uShadowMap", "uShadowProj", "uShadowView", "uShadowTexel"
+    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun", "uShadowMap", "uShadowProj", "uShadowView", "uShadowTexel", "uSunShading", "uHasGlow"
 };
 enum {
     W_TO_WORLD, W_VIEW, W_PROJ, W_SIZE, W_TIME, W_SCALE, W_RAIN, W_BOX, W_DEPTH, W_NEAR, W_FAR, W_BRIGHTNESS, W_AMOUNT,
@@ -445,6 +445,8 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glUniform1i(u[U_SHADOW_MAP], 5);
     glUniformMatrix4fv(u[U_SHADOW_PROJ], 1, GL_FALSE, hVideo->shadow.proj);
     glUniform3fv(u[U_SHADOW_VIEW], 4, params->shadow_view);
+    glUniform1f(u[U_SUN_SHADING], params->sun_shading);
+    glUniform1f(u[U_HAS_GLOW], hVideo->post.glowTex != 0 ? 1.0f : 0.0f);
     glUniform1f(u[U_SHADOW_TEXEL], hVideo->shadow.valid && hVideo->shadow.size > 0 ? 1.0f / hVideo->shadow.size : 0.0f);
     glUniform1f(u[U_PAINT], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->paint : 0.0f);
     glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -528,11 +530,9 @@ br_error BR_PUBLIC_ENTRY BrGLShadowPassBegin(br_pixelmap* screen, int size) {
             glDeleteFramebuffers(1, &hVideo->shadow.fbo);
             glDeleteTextures(1, &hVideo->shadow.tex);
         }
-        hVideo->shadow.tex = create_texture(GL_DEPTH_COMPONENT24, size, size, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, GL_LINEAR, 0);
-        /* compared in the lookup, filtered between texels */
+        /* (its depths are read and compared in the post pass, which filters them itself) */
+        hVideo->shadow.tex = create_texture(GL_DEPTH_COMPONENT24, size, size, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, GL_NEAREST, 0);
         glBindTexture(GL_TEXTURE_2D, hVideo->shadow.tex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glBindTexture(GL_TEXTURE_2D, 0);
@@ -568,6 +568,15 @@ void BR_PUBLIC_ENTRY BrGLShadowPassEnd(br_pixelmap* screen) {
     }
     self->asFront.video.shadow.active = 0;
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void BR_PUBLIC_ENTRY BrGLSprites(br_pixelmap* screen, int on) {
+    br_device_pixelmap* self = (br_device_pixelmap*)screen;
+
+    if (self == NULL || self->screen != self) {
+        return;
+    }
+    self->asFront.video.post.sprites = on;
 }
 
 void PostProcessRecordScene(HVIDEO hVideo, int x, int y, int w, int h, const br_matrix4* view_to_screen, br_token hint,

@@ -1,7 +1,6 @@
 ##ifdef GL_ES
 #version 300 es
 precision highp float;
-precision highp sampler2DShadow;
 ##endif
 ##ifdef GL_CORE
 #version 140
@@ -50,10 +49,13 @@ uniform float uPaint;
 // sun shadows: the sun's direction in view space, and their strength; the sun's shadow map: its projection,
 // world to its camera (rows: x, y, z, position), its texel size (0 for none this frame)
 uniform vec4 uSun;
-uniform sampler2DShadow uShadowMap;
+uniform sampler2D uShadowMap;
 uniform mat4 uShadowProj;
 uniform vec3 uShadowView[4];
 uniform float uShadowTexel;
+// the strength of the scene's sun shading (see brender.frag.glsl), and whether there is a glow attachment
+uniform float uSunShading;
+uniform float uHasGlow;
 
 out vec4 fragColour;
 
@@ -297,10 +299,49 @@ vec2 ripple(vec3 P) {
     return d * scale * vec2(1.0, 0.6);
 }
 
-// Sun shadows, by the sun's shadow map (drawn from the sun around the car, all of the world in it): 1 for lit,
-// down to 0 in shadow. Surfaces facing away from the sun are left to the sun shading. The lookup is filtered
-// over a few texels, for soft edges
-float sunShadow(vec2 p) {
+// world position of view space point P
+vec3 toWorld(vec3 P) {
+    return uToWorld[3] + P.x * uToWorld[0] + P.y * uToWorld[1] + P.z * uToWorld[2];
+}
+
+// How much the world point w is in the sun's shadow, 0..1, by the shadow map: its depths over 4x4 texels around
+// w, weighted as three bilinear lookups a texel apart (soft edges), each counting only what is more than `gap`
+// (world units) nearer the sun. `fade`: 1 well inside the map, down to 0 towards (and beyond) its edges
+float shadowed(vec3 w, float gap, out float fade) {
+    vec3 lv = uShadowView[3] + w.x * uShadowView[0] + w.y * uShadowView[1] + w.z * uShadowView[2];
+    vec4 clip = uShadowProj * vec4(lv, 1.0);
+    vec3 m = clip.xyz / clip.w * 0.5 + 0.5;
+    fade = 0.0;
+    if (m.x <= 0.0 || m.y <= 0.0 || m.x >= 1.0 || m.y >= 1.0 || m.z >= 1.0) {
+        return 0.0;
+    }
+    vec2 e = min(m.xy, 1.0 - m.xy) / 0.06;
+    fade = clamp(min(e.x, e.y), 0.0, 1.0);
+    // (the map's depth is linear over its depth range: 2 / its projection's z scale)
+    float threshold = m.z - gap * abs(uShadowProj[2][2]) * 0.5 - 0.00005;
+    float texels = 1.0 / uShadowTexel;
+    vec2 f = m.xy * texels - 0.5;
+    ivec2 base = ivec2(floor(f)) - 1;
+    vec2 fr = fract(f);
+    vec4 wx = vec4(1.0 - fr.x, 1.0, 1.0, fr.x);
+    vec4 wy = vec4(1.0 - fr.y, 1.0, 1.0, fr.y);
+    int last = int(texels) - 1;
+    float sum = 0.0;
+    for (int j = 0; j < 4; j++) {
+        for (int i = 0; i < 4; i++) {
+            ivec2 t = clamp(base + ivec2(i, j), ivec2(0), ivec2(last));
+            sum += (texelFetch(uShadowMap, t, 0).r < threshold ? 1.0 : 0.0) * wx[i] * wy[j];
+        }
+    }
+    return sum / 9.0;
+}
+
+// Sun shadows (the sun's shadow map, of all the world around the car): what the colour at p is multiplied by.
+// What is in shadow ends up equally dark: the ground under a bridge, and the faces turned away from the sun
+// (which get no sun either), those only darkened as far as the sun shading hasn't already. The sprites
+// (pedestrians: flat cards facing the camera, marked in the glow's alpha) go by the map alone, whichever way
+// they face, not counting the slight overlap of their sun facing selves in the map
+float sunShadow(vec2 p, vec2 size) {
     if (uShadowTexel <= 0.0 || texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
         return 1.0;
     }
@@ -309,31 +350,26 @@ float sunShadow(vec2 p) {
     vec3 s = normalize(uSun.xyz);
     vec3 n = depthNormal(p, P);
     float facing = dot(n, s);
-    if (facing <= 0.02) {
-        return 1.0;
+    // how bright what is in shadow is, relative to the ground in the sun
+    float shade_level = 1.0 - min(0.38 * uSun.w, 0.8);
+    float fade;
+    if (uHasGlow > 0.5 && abs(1.0 - textureLod(uGlow, p / size, 0.0).a - 0.04) < 0.018) {
+        float in_shadow = shadowed(toWorld(P + n * 0.01), 0.15, fade);
+        return mix(1.0, shade_level, in_shadow * fade);
     }
-    // a little off the surface, along its normal, more at grazing angles to the sun (against shadow acne)
-    vec3 Q = P + n * (0.006 + 0.0006 * dist) * (1.0 + 2.0 * (1.0 - facing));
-    vec3 w = uToWorld[3] + Q.x * uToWorld[0] + Q.y * uToWorld[1] + Q.z * uToWorld[2];
-    vec3 lv = uShadowView[3] + w.x * uShadowView[0] + w.y * uShadowView[1] + w.z * uShadowView[2];
-    vec4 clip = uShadowProj * vec4(lv, 1.0);
-    vec3 m = clip.xyz / clip.w * 0.5 + 0.5;
-    if (m.x <= 0.0 || m.y <= 0.0 || m.x >= 1.0 || m.y >= 1.0 || m.z >= 1.0) {
-        return 1.0;
+    // the sun shading the surface already has (see surfaceShading in brender.frag.glsl), which shadow only adds to
+    float sun_shade = clamp(1.0 + uSunShading * 0.2 * (facing - dot(uUp, s)), 0.6, 1.04);
+    float target = min(1.0, shade_level / sun_shade);
+    // facing the sun: by the map, a little off the surface along its normal, more at grazing angles (against
+    // shadow acne); facing away: in shadow
+    float front = smoothstep(-0.02, 0.12, facing);
+    float in_shadow = 1.0;
+    if (front > 0.0) {
+        vec3 Q = P + n * (0.006 + 0.0006 * dist) * (1.0 + 2.0 * (1.0 - max(facing, 0.0)));
+        float lit_shadow = shadowed(toWorld(Q), 0.0, fade);
+        in_shadow = mix(1.0, lit_shadow * fade, front);
     }
-    float lit = 0.0;
-    for (int y = -1; y <= 1; y++) {
-        for (int x = -1; x <= 1; x++) {
-            lit += texture(uShadowMap, vec3(m.xy + vec2(float(x), float(y)) * 1.2 * uShadowTexel, m.z - 0.00005));
-        }
-    }
-    lit /= 9.0;
-    // fading out towards the map's edges
-    vec2 e = min(m.xy, 1.0 - m.xy) / 0.06;
-    float fade = clamp(min(e.x, e.y), 0.0, 1.0);
-    // and as the surface turns away from the sun (where the sun shading takes over)
-    fade *= smoothstep(0.02, 0.15, facing);
-    return mix(1.0, lit, fade);
+    return mix(1.0, target, in_shadow);
 }
 
 // Ice and water (the mirroring surfaces, masked in the glow's alpha as 1 - 1 for ice, 1 - 0.5 for water): a soft
@@ -341,7 +377,8 @@ float sunShadow(vec2 p) {
 // water rippling
 vec3 mirror(vec2 p, vec2 size, vec3 c) {
     float amount = 1.0 - textureLod(uGlow, p / size, 0.0).a;
-    if (amount <= 0.01 || texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
+    // (below: none, or the sprites' mark, see the sun shadows)
+    if (amount <= 0.07 || texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
         return c;
     }
     // (the kinds' masks blend at their edges, which then pass for another kind for a pixel)
@@ -467,7 +504,7 @@ void main() {
     if (uSun.w > 0.0) {
         // (light sources aren't shadowed)
         float lit = uGlowStrength > 0.0 ? clamp(dot(textureLod(uGlow, p / size, 0.0).rgb, vec3(4.0)), 0.0, 1.0) : 0.0;
-        c *= 1.0 - min(0.38 * uSun.w, 0.8) * (1.0 - sunShadow(p)) * (1.0 - lit);
+        c *= mix(1.0, sunShadow(p, size), 1.0 - lit);
     }
     if (uIce > 0.0 || uWater > 0.0 || uPaint > 0.0) {
         c = mirror(p, size, c);

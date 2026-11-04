@@ -404,6 +404,7 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
         glUniform1f(hVideo->brenderProgram.uniforms.surface_reflect,
                     fade > 0.0f || (blending_on && reflect <= 0.0f) ? -1.0f : reflect);
         glUniform1f(hVideo->brenderProgram.uniforms.distance_fade, fade);
+        glUniform1i(hVideo->brenderProgram.uniforms.surface_sprite, hVideo->post.drawSprite != 0);
         glUniform1f(hVideo->brenderProgram.uniforms.surface_wear,
                     wear_slot >= 0 && hVideo->slotWear != NULL ? hVideo->slotWear(wear_slot) : 0.0f);
         if (hVideo->post.active && hVideo->post.depthSnapshot && hVideo->post.drawSoftDistance > 0.0f) {
@@ -493,6 +494,7 @@ void StoredGLRenderGroup(br_geometry_stored* self, br_renderer* renderer, const 
 #endif
 
     hVideo->post.drawSoftDistance = renderer->state.current->soft_distance;
+    hVideo->post.drawSprite = renderer->state.current->sprite;
 
     model.projection_brender = cache->model.p_br;
     model.projection = cache->model.p;

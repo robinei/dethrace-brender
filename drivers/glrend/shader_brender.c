@@ -34,6 +34,7 @@ static void VIDEOI_GetShaderVariables(HVIDEO hVideo) {
     hVideo->brenderProgram.uniforms.soft_depth = glGetUniformLocation(hVideo->brenderProgram.program, "soft_depth");
     hVideo->brenderProgram.uniforms.soft_distance = glGetUniformLocation(hVideo->brenderProgram.program, "soft_distance");
     hVideo->brenderProgram.uniforms.surface_wear = glGetUniformLocation(hVideo->brenderProgram.program, "surface_wear");
+    hVideo->brenderProgram.uniforms.surface_sprite = glGetUniformLocation(hVideo->brenderProgram.program, "surface_sprite");
     hVideo->brenderProgram.uniforms.scene_brightness = glGetUniformLocation(hVideo->brenderProgram.program, "scene_brightness");
     hVideo->brenderProgram.uniforms.num_spots = glGetUniformLocation(hVideo->brenderProgram.program, "num_spots");
     hVideo->brenderProgram.uniforms.spots = glGetUniformLocation(hVideo->brenderProgram.program, "spots");

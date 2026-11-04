@@ -71,6 +71,7 @@ typedef struct _VIDEO {
             GLint soft_depth;        /* sampler2D */
             GLint soft_distance;     /* float */
             GLint surface_wear;      /* float */
+            GLint surface_sprite;    /* bool */
             GLint scene_brightness;  /* float */
             GLint num_spots;         /* int */
             GLint spots;             /* vec4[3 * MAX] */
@@ -113,6 +114,8 @@ typedef struct _VIDEO {
         int depthSnapshot;
         float softDistance; /* soft particles: what is drawn fades out this close to the snapshot depth, 0 for off */
         float drawSoftDistance; /* that of the models being drawn (kept in their state, see state_stack) */
+        int sprites; /* what is drawn is sprites, see BrGLSprites */
+        int drawSprite; /* the model being drawn is (kept in its state) */
         GLuint program, aoProgram;
         GLint uniforms[32], aoUniforms[8];
         GLuint weatherProgram; /* snow and rain particles, see weather.vert.glsl */

@@ -104,6 +104,8 @@ uniform sampler2D soft_depth;
 uniform float soft_distance;
 // Car wear (0 for none, up to 2): dirt and scratches on the paint as the car is damaged
 uniform float surface_wear;
+// Drawn as a sprite (a flat card facing the camera: the pedestrians), marked for the sun shadows
+uniform bool surface_sprite;
 // Night: the scene is darkened to scene_brightness, except for light source texels, and lit by lights (car
 // headlights, fires) in view space: position + range, direction (zero for a point light) + strength,
 // colour + haze
@@ -580,6 +582,7 @@ void main() {
     // what a flash lights glows a little too
     glowColour.rgb += flashColour * 0.25 * (1.0 - fog);
     if (surface_reflect >= 0.0) {
-        glowColour.a = 1.0 - surface_reflect * (dot(normal.xyz, normal.xyz) > 0.01 ? 1.0 : 0.0);
+        // (the sprites are marked 1 - 0.04, for the sun shadows)
+        glowColour.a = surface_sprite ? 0.96 : 1.0 - surface_reflect * (dot(normal.xyz, normal.xyz) > 0.01 ? 1.0 : 0.0);
     }
 }

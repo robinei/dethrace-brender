@@ -221,6 +221,8 @@ typedef struct state_stack {
     /* soft particles: the post-processing's soft distance when the model was rendered (blended models are
      * deferred to the end of the scene, so it is kept with them), see BrGLPostProcessSoftParticles */
     float soft_distance;
+    /* drawn as a sprite (a flat card facing the camera), see BrGLSprites */
+    int sprite;
 } state_stack;
 
 typedef struct {
