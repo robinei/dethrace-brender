@@ -38,6 +38,7 @@ typedef struct br_gl_post_params {
     float sun[4];               /* sun shadows: the sun's direction in view space, and their strength (0 disables) */
     float shadow_view[3 * 12];  /* world to the shadow maps' cameras, as br_matrix34s (used if a map was drawn) */
     float sun_shading;          /* the strength of the scenes' sun shading (scene_surface), which the shadows match */
+    float specular;             /* the sun's highlights (in the direction of sun), 0 disables */
     int shimmer_count;          /* heat shimmer above these points: view space position and strength, up to 8 */
     float shimmers[4 * 8];
 } br_gl_post_params;

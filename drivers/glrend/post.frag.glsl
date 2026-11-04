@@ -50,6 +50,9 @@ uniform float uPaint;
 // covering more than the one before): their projections, world to their cameras (rows: x, y, z, position, for
 // each), their texel sizes (0 for none this frame)
 uniform vec4 uSun;
+// the sun's highlights: their strength; the sun's direction in view space
+uniform float uSpecular;
+uniform vec3 uSunDir;
 uniform sampler2D uShadowMap[3];
 uniform mat4 uShadowProj[3];
 uniform vec3 uShadowView[12];
@@ -481,6 +484,9 @@ float shadowLevels(vec2 p, vec3 P, vec3 n, float facing, float gap, bool sprite)
 // either), those only darkened as far as the sun shading hasn't already. The sprites (pedestrians: flat cards
 // facing the camera, marked with their normals) go by the maps alone, whichever way they face, not counting the
 // slight overlap of their sun facing selves in the maps
+// how much the pixel is in shadow, 0..1, as sunShadow found (for the sun's highlights)
+float gInShadow = 0.0;
+
 float sunShadow(vec2 p, vec2 size) {
     if (uShadowTexel[0] + uShadowTexel[1] + uShadowTexel[2] <= 0.0 || texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
         return 1.0;
@@ -492,7 +498,8 @@ float sunShadow(vec2 p, vec2 size) {
     // how bright what is in shadow is, relative to the ground in the sun
     float shade_level = 1.0 - min(0.38 * uSun.w, 0.8);
     if (isSprite(p)) {
-        return mix(1.0, shade_level, shadowLevels(p, P, n, facing, 0.15, true));
+        gInShadow = shadowLevels(p, P, n, facing, 0.15, true);
+        return mix(1.0, shade_level, gInShadow);
     }
     // the sun shading the surface already has (see surfaceShading in brender.frag.glsl), which shadow only adds to
     float sun_shade = clamp(1.0 + uSunShading * 0.2 * (facing - dot(uUp, s)), 0.6, 1.04);
@@ -503,7 +510,33 @@ float sunShadow(vec2 p, vec2 size) {
     if (front > 0.0) {
         in_shadow = mix(1.0, shadowLevels(p, P, n, facing, 0.0, false), front);
     }
+    gInShadow = in_shadow;
     return mix(1.0, target, in_shadow);
+}
+
+// The sun's highlight: a broad soft sheen where a surface faces halfway between the eye and the sun, sliding over
+// it as the view turns (the surfaces stay flat), on the lighter texels more than the darker (by the colour `base`,
+// before the shadows), stronger at grazing angles; none in shadow (gInShadow) or on sprites
+vec3 sunHighlight(vec2 p, vec3 base) {
+    if (texelFetch(uDepth, ivec2(p), 0).r >= 1.0 || isSprite(p)) {
+        return vec3(0.0);
+    }
+    vec3 P = viewPosition(p);
+    vec3 n = viewNormal(p, P);
+    vec3 s = normalize(uSunDir);
+    vec3 v = normalize(-P);
+    if (dot(n, s) <= 0.0) {
+        return vec3(0.0);
+    }
+    vec3 h = normalize(s + v);
+    float nh = max(dot(n, h), 0.0);
+    // broad (and a little tighter core)
+    float spec = 0.7 * pow(nh, 10.0) + 0.3 * pow(nh, 40.0);
+    float grazing = 1.0 - max(dot(n, v), 0.0);
+    float fresnel = 0.6 + 0.8 * grazing * grazing;
+    float lum = dot(base, vec3(0.299, 0.587, 0.114));
+    float gloss = smoothstep(0.1, 0.75, lum);
+    return vec3(1.0, 0.95, 0.85) * (spec * fresnel * gloss * (1.0 - gInShadow) * 0.3 * uSpecular);
 }
 
 // Ice and water (the mirroring surfaces, masked in the glow's alpha as 1 - 1 for ice, 1 - 0.5 for water): a soft
@@ -634,10 +667,14 @@ void main() {
         float shade = uAOStrength <= 1.0 ? mix(1.0, ao, uAOStrength) : pow(ao, uAOStrength);
         c *= mix(1.0, shade, 1.0 - lit);
     }
+    vec3 base = c;
     if (uSun.w > 0.0) {
         // (light sources aren't shadowed)
         float lit = uGlowStrength > 0.0 ? clamp(dot(textureLod(uGlow, p / size, 0.0).rgb, vec3(4.0)), 0.0, 1.0) : 0.0;
         c *= mix(1.0, sunShadow(p, size), 1.0 - lit);
+    }
+    if (uSpecular > 0.0) {
+        c += sunHighlight(p, base);
     }
     if (uIce > 0.0 || uWater > 0.0 || uPaint > 0.0) {
         c = mirror(p, size, c);
