@@ -36,6 +36,16 @@ add_custom_command(
         COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DFILE=ssao.frag.glsl" -P "${BRender_SOURCE_DIR}/cmake/EmbedResource.cmake"
         DEPENDS ssao.frag.glsl
 )
+add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/weather.vert.glsl.h"
+        COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DFILE=weather.vert.glsl" -P "${BRender_SOURCE_DIR}/cmake/EmbedResource.cmake"
+        DEPENDS weather.vert.glsl
+)
+add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/weather.frag.glsl.h"
+        COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DFILE=weather.frag.glsl" -P "${BRender_SOURCE_DIR}/cmake/EmbedResource.cmake"
+        DEPENDS weather.frag.glsl
+)
 
 
 set(GLSTATE_FILES
@@ -165,6 +175,8 @@ add_library(glrend
         "${CMAKE_CURRENT_BINARY_DIR}/post.vert.glsl.h"
         "${CMAKE_CURRENT_BINARY_DIR}/post.frag.glsl.h"
         "${CMAKE_CURRENT_BINARY_DIR}/ssao.frag.glsl.h"
+        "${CMAKE_CURRENT_BINARY_DIR}/weather.vert.glsl.h"
+        "${CMAKE_CURRENT_BINARY_DIR}/weather.frag.glsl.h"
         )
 
 get_target_property(target_type glrend TYPE)

@@ -24,6 +24,8 @@
 #include "post.vert.glsl.h"
 #include "post.frag.glsl.h"
 #include "ssao.frag.glsl.h"
+#include "weather.vert.glsl.h"
+#include "weather.frag.glsl.h"
 
 #ifndef GL_SAMPLE_SHADING
 #define GL_SAMPLE_SHADING 0x8C36 /* OpenGL 4.0 / ARB_sample_shading */
@@ -39,6 +41,13 @@ static const char* uniform_names[U_COUNT] = {
     "uColour", "uDepth", "uGlow", "uAO", "uView", "uProj", "uNear", "uFar", "uTime", "uScale", "uStart", "uEnd",
     "uMaxRadius", "uGlowStrength", "uFlareStrength", "uAOStrength", "uSpeed", "uShimmerCount", "uShimmers", "uGrade", "uAODepth",
     "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint"
+};
+enum {
+    W_TO_WORLD, W_VIEW, W_PROJ, W_SIZE, W_TIME, W_SCALE, W_RAIN, W_BOX, W_DEPTH, W_NEAR, W_FAR, W_BRIGHTNESS, W_AMOUNT,
+    W_COUNT
+};
+static const char* weather_uniform_names[W_COUNT] = {
+    "uToWorld", "uView", "uProj", "uSize", "uTime", "uScale", "uRain", "uBox", "uDepth", "uNear", "uFar", "uBrightness", "uAmount"
 };
 enum {
     A_DEPTH, A_VIEW, A_PROJ, A_NEAR, A_FAR, A_RADIUS, A_AO, A_PASS,
@@ -171,6 +180,64 @@ static GLuint compile_program(const char* name, const char* frag_source, size_t 
         locations[i] = glGetUniformLocation(program, names[i]);
     }
     return program;
+}
+
+static GLuint compile_weather_program(GLint* locations) {
+    GLuint vert, frag, program;
+    int i;
+
+    vert = VIDEOI_CreateAndCompileShader("weather.vert", GL_VERTEX_SHADER, WEATHER_VERT_GLSL, sizeof(WEATHER_VERT_GLSL));
+    frag = VIDEOI_CreateAndCompileShader("weather.frag", GL_FRAGMENT_SHADER, WEATHER_FRAG_GLSL, sizeof(WEATHER_FRAG_GLSL));
+    if (!vert || !frag) {
+        return 0;
+    }
+    program = VIDEOI_CreateAndCompileProgram(vert, frag);
+    glDeleteShader(vert);
+    glDeleteShader(frag);
+    for (i = 0; program && i < W_COUNT; i++) {
+        locations[i] = glGetUniformLocation(program, weather_uniform_names[i]);
+    }
+    return program;
+}
+
+/* the snow or rain over the post-processed view (with the post program's vertex array bound) */
+static void draw_weather(HVIDEO hVideo, const br_gl_post_params* params, int w, int h) {
+    GLint* u = hVideo->post.weatherUniforms;
+    int rain = params->weather[0] > 0.5f;
+    int count;
+
+    if (params->weather[1] <= 0.0f || hVideo->post.viewArea <= 0) {
+        return;
+    }
+    if (hVideo->post.weatherProgram == 0) {
+        hVideo->post.weatherProgram = compile_weather_program(u);
+        if (hVideo->post.weatherProgram == 0) {
+            return;
+        }
+    }
+    /* about this many in a box 3 units (~20m) across, more with the amount */
+    count = (int)((rain ? 12000.0f : 12000.0f) * (params->weather[1] < 2.0f ? params->weather[1] : 2.0f));
+    glUseProgram(hVideo->post.weatherProgram);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, hVideo->post.depthTex);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform1i(u[W_DEPTH], 1);
+    glUniform3fv(u[W_TO_WORLD], 4, params->to_world);
+    glUniform4fv(u[W_VIEW], 1, hVideo->post.view);
+    glUniform2fv(u[W_PROJ], 1, hVideo->post.proj);
+    glUniform2f(u[W_SIZE], (float)w, (float)h);
+    glUniform1f(u[W_TIME], params->time);
+    glUniform1f(u[W_SCALE], h / 1080.0f);
+    glUniform1f(u[W_RAIN], rain ? 1.0f : 0.0f);
+    glUniform1f(u[W_BOX], 3.0f);
+    glUniform1f(u[W_NEAR], hVideo->post.nearZ);
+    glUniform1f(u[W_FAR], hVideo->post.farZ);
+    glUniform1f(u[W_BRIGHTNESS], params->weather[2]);
+    glUniform1f(u[W_AMOUNT], params->weather[1]);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDrawArrays(GL_TRIANGLES, 0, count * 6);
+    glDisable(GL_BLEND);
 }
 
 br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap* screen, br_boolean glow) {
@@ -372,6 +439,7 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glUniform3fv(u[U_TO_WORLD], 4, params->to_world);
     glUniform1f(u[U_PAINT], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->paint : 0.0f);
     glDrawArrays(GL_TRIANGLES, 0, 3);
+    draw_weather(hVideo, params, w, h);
 
     glBindVertexArray(0);
     glActiveTexture(GL_TEXTURE3);

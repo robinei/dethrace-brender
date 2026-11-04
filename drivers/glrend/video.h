@@ -102,6 +102,8 @@ typedef struct _VIDEO {
         float drawSoftDistance; /* that of the models being drawn (kept in their state, see state_stack) */
         GLuint program, aoProgram;
         GLint uniforms[32], aoUniforms[8];
+        GLuint weatherProgram; /* snow and rain particles, see weather.vert.glsl */
+        GLint weatherUniforms[16];
         /* the view: the largest perspective scene drawn while active */
         int viewArea;
         float view[4]; /* x, y, width, height in window pixels */
