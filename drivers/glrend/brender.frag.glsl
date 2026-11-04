@@ -198,9 +198,11 @@ float valueNoise(vec3 x) {
 
 // Relief: the texture's brightness taken as height (bright is raised), how much brighter or darker the sun makes
 // the surface by it, by the normal tilted along its gradient (without tangents: from the screen derivatives).
-// Fades out where the texture is minified, where it would only shimmer
-float relief(vec3 p, vec3 n, vec2 uv) {
+// Fades out where the texture is minified, where it would only shimmer. Read around `at` (uv, or snapped to
+// the texels' centres with the sharp filter)
+float relief(vec3 p, vec3 n, vec2 uv, vec2 at) {
     vec2 size = vec2(textureSize(main_texture, 0));
+    // (the derivatives of the unsnapped coordinates, for the mip level and the screen to texture mapping)
     vec2 dx = dFdx(uv);
     vec2 dy = dFdy(uv);
     float texels = max(length(dx * size), length(dy * size));
@@ -210,10 +212,10 @@ float relief(vec3 p, vec3 n, vec2 uv) {
     }
     vec2 t = 1.0 / size;
     const vec3 lum = vec3(0.299, 0.587, 0.114);
-    float hl = dot(textureGrad(main_texture, uv - vec2(t.x, 0.0), dx, dy).rgb, lum);
-    float hr = dot(textureGrad(main_texture, uv + vec2(t.x, 0.0), dx, dy).rgb, lum);
-    float hd = dot(textureGrad(main_texture, uv - vec2(0.0, t.y), dx, dy).rgb, lum);
-    float hu = dot(textureGrad(main_texture, uv + vec2(0.0, t.y), dx, dy).rgb, lum);
+    float hl = dot(textureGrad(main_texture, at - vec2(t.x, 0.0), dx, dy).rgb, lum);
+    float hr = dot(textureGrad(main_texture, at + vec2(t.x, 0.0), dx, dy).rgb, lum);
+    float hd = dot(textureGrad(main_texture, at - vec2(0.0, t.y), dx, dy).rgb, lum);
+    float hu = dot(textureGrad(main_texture, at + vec2(0.0, t.y), dx, dy).rgb, lum);
     // the height's change per uv, then per window pixel; in world units (a height range of about 35cm: exaggerated)
     vec2 dh = vec2(hr - hl, hu - hd) / (2.0 * t) * 0.05 * surface_haze[1].y;
     float dhdx = dot(dh, dx);
@@ -246,7 +248,7 @@ vec3 carWear(vec3 c, vec3 model_pos) {
     return mix(c, vec3(0.62, 0.6, 0.57), scratch * 0.55 * min(w, 1.0));
 }
 
-vec3 surfaceShading(vec3 model_pos, vec3 p, vec3 vertex_n, vec2 uv) {
+vec3 surfaceShading(vec3 model_pos, vec3 p, vec3 vertex_n, vec2 uv, vec2 relief_uv) {
     vec3 shade = vec3(1.0);
     if (surface_sun.w > 0.0) {
         // relative to the ground, which keeps its brightness: walls turned away from the sun darken. The face's
@@ -274,7 +276,7 @@ vec3 surfaceShading(vec3 model_pos, vec3 p, vec3 vertex_n, vec2 uv) {
         shade *= clamp(1.0 + surface_sun.w * 0.2 * k, 0.6, 1.04);
         // (not on the cars: their paint is smooth, and their textures' mottling would only make it look scaly)
         if (surface_haze[1].y > 0.0 && abs(abs(surface_reflect) - 0.25) > 0.01) {
-            shade *= clamp(1.0 + 2.0 * relief(p, n, uv), 0.6, 1.4);
+            shade *= clamp(1.0 + 2.0 * relief(p, n, uv, relief_uv), 0.6, 1.4);
         }
     }
     if (surface_up.w > 0.0) {
@@ -451,6 +453,9 @@ void main() {
     processClipPlanes();
 
     vec2 mappedUV = SurfaceMap(rawPosition, rawNormal, uv);
+    // where the relief reads the texture: with the sharp filter, snapped like the colour, so it is flat within
+    // each texel too (each a little tile tilted its own way) and the texels stay square
+    vec2 reliefUV = mappedUV;
 
     if (disable_texture) {
         // Lit, non-prelit vertices already include the material colour.
@@ -466,6 +471,7 @@ void main() {
             vec2 band = max(fwidth(texel), vec2(1e-5));
             vec2 snapped = (seam + clamp((texel - seam) / band, -0.5, 0.5)) / size;
             textureColour = textureGrad(main_texture, snapped, dFdx(mappedUV), dFdy(mappedUV));
+            reliefUV = snapped;
         } else {
             textureColour = texture(main_texture, mappedUV);
         }
@@ -498,7 +504,7 @@ void main() {
     // (the track materials are lit or not as their files say, so this goes by whether there is a normal:
     // not for the sprites)
     if ((surface_sun.w > 0.0 || surface_up.w > 0.0) && !disable_texture && dot(normal.xyz, normal.xyz) > 0.01) {
-        fragColour.rgb *= surfaceShading(rawPosition, position.xyz, normal.xyz, mappedUV);
+        fragColour.rgb *= surfaceShading(rawPosition, position.xyz, normal.xyz, mappedUV, reliefUV);
     }
 
     if (surface_wear > 0.0 && !disable_texture) {
