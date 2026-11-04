@@ -289,14 +289,16 @@ vec3 wetGround(vec2 p, vec2 size) {
     vec2 w = (uToWorld[3] + P.x * uToWorld[0] + P.y * uToWorld[1] + P.z * uToWorld[2]).xz;
     float wet = smoothstep(0.4, 0.75, valueNoise2(w * 1.6) * 0.75 + valueNoise2(w * 7.0) * 0.25);
     float rough = 1.0 - wet;
-    // the surface's grain jitters where the reflection is looked up, more where it is only damp
+    // the surface's grain jitters where the reflection is looked up, only where it is just damp (the puddles
+    // reflect cleanly)
     vec2 grain = vec2(hash12(p), hash12(p + 17.3)) - 0.5;
-    hit += grain * vec2(5.0, 9.0) * uScale * (0.4 + rough);
+    hit += grain * vec2(2.0, 4.0) * uScale * rough;
     vec3 sum = vec3(0.0);
-    float stretch = (0.004 + 0.005 * rough) * uView.w;
-    // and spread sideways a little, zigzagging, so the reflections of things side by side run together
-    float spread = (0.003 + 0.004 * rough) * uView.w;
-    float lod = mix(2.3, 3.6, rough);
+    // smeared towards the viewer as on wet asphalt (in the puddles, a little), and sideways where damp
+    float stretch = (0.0025 + 0.004 * rough) * uView.w;
+    float spread = 0.003 * rough * uView.w;
+    // (the glow's mip level: the puddles' reflections sharp, the damp rest's softer)
+    float lod = mix(1.0, 2.6, rough);
     for (int k = -4; k <= 4; k++) {
         float weight = 1.0 - abs(float(k)) / 5.0;
         float side = (fract(float(k) * 0.618 + 0.31) - 0.5) * 2.0;
