@@ -409,6 +409,8 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
                     fade > 0.0f || (blending_on && reflect <= 0.0f) ? -1.0f : reflect);
         glUniform1f(hVideo->brenderProgram.uniforms.distance_fade, fade);
         glUniform1i(hVideo->brenderProgram.uniforms.surface_sprite, hVideo->post.drawSprite != 0);
+        /* (texture_reflect -0.5: a soft edged texture, see brender.frag.glsl) */
+        glUniform1i(hVideo->brenderProgram.uniforms.surface_soft, reflect < -0.45f && reflect > -0.55f);
         glUniform1f(hVideo->brenderProgram.uniforms.surface_wear,
                     wear_slot >= 0 && hVideo->slotWear != NULL ? hVideo->slotWear(wear_slot) : 0.0f);
         if (hVideo->post.active && hVideo->post.depthSnapshot && hVideo->post.drawSoftDistance > 0.0f) {

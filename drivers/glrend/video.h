@@ -72,6 +72,7 @@ typedef struct _VIDEO {
             GLint soft_distance;     /* float */
             GLint surface_wear;      /* float */
             GLint surface_sprite;    /* bool */
+            GLint surface_soft;      /* bool */
             GLint scene_brightness;  /* float */
             GLint num_spots;         /* int */
             GLint spots;             /* vec4[3 * MAX] */

@@ -109,6 +109,9 @@ uniform float soft_distance;
 uniform float surface_wear;
 // Drawn as a sprite (a flat card facing the camera: the pedestrians), marked for the sun shadows
 uniform bool surface_sprite;
+// A soft edged texture (smoke puffs): instead of being cut out by its colour key, it fades out smoothly over
+// its outline, and towards the edges of the quad
+uniform bool surface_soft;
 // Night: the scene is darkened to scene_brightness, except for light source texels, and lit by lights (car
 // headlights, fires) in view space: position + range, direction (zero for a point light) + strength,
 // colour + haze
@@ -487,6 +490,19 @@ void main() {
         } else {
             textureColour = texture(main_texture, mappedUV);
         }
+        if (surface_soft) {
+            // the cut out shape, blurred (two mip levels coarser), un-premultiplied, and faded towards the quad's
+            // rim, so no hard border shows
+            float lod = log2(max(max(length(dFdx(mappedUV) * vec2(textureSize(main_texture, 0))),
+                                     length(dFdy(mappedUV) * vec2(textureSize(main_texture, 0)))), 1e-4));
+            vec4 soft = textureLod(main_texture, mappedUV, max(lod, 0.0) + 2.0);
+            textureColour.rgb = soft.rgb / max(soft.a, 0.05);
+            vec2 q = fract(mappedUV) * 2.0 - 1.0;
+            coverage = smoothstep(0.0, 0.7, soft.a) * (1.0 - smoothstep(0.55, 1.0, length(q)));
+            if (coverage <= 0.003) {
+                discard;
+            }
+        } else
         // full black pixel is transparent. Paletted textures also store the key as
         // alpha == 0, so filtered/mipmapped texels carry partial coverage: discard below
         // half coverage and un-premultiply the rest to avoid dark fringes.
