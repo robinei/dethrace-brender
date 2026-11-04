@@ -12,6 +12,10 @@ uniform sampler2D uColour;
 // 0: all in one; 1: the lit scene only (into a texture, see post.c), 2: the rest, with uColour that lit scene
 // (mipmapped), so the depth of field and the speed blur blur the shadows and reflections with everything else
 uniform int uStage;
+// lamps (street lamps, neon, signs) the air glows around at night: view space position and the reach of the glow,
+// colour and strength
+uniform vec4 uLamps[48];
+uniform int uLampCount;
 uniform sampler2D uDepth;
 uniform sampler2D uGlow;
 uniform sampler2D uAO;
@@ -679,6 +683,36 @@ vec3 grade(vec3 c) {
     return clamp(c, 0.0, 1.0);
 }
 
+// The light the lamps scatter towards the eye from the air in front of the pixel (as far as what is seen there,
+// the sky too): for each, the integral of 1/distance^2 along the view ray, within its glow's reach. Only the
+// pixels whose ray passes near a lamp pay more than a test
+vec3 lampHaze(vec2 p) {
+    vec3 P = viewPosition(p);
+    float len = length(P);
+    vec3 r = P / max(len, 0.0001);
+    vec3 sum = vec3(0.0);
+    for (int i = 0; i < uLampCount; i++) {
+        vec3 c = uLamps[2 * i].xyz;
+        float reach = uLamps[2 * i].w;
+        float b = dot(c, r);
+        float h2 = dot(c, c) - b * b;
+        if (h2 >= reach * reach || b < -reach) {
+            continue;
+        }
+        // (no closer than a quarter of the reach: soft, the lamp itself is the glow's, see bloom)
+        float h = max(sqrt(max(h2, 0.0)), 0.25 * reach);
+        float scatter = (atan((len - b) / h) + atan(b / h)) / h;
+        // fading out to the edge of the reach, from the ray's nearest point to the lamp; most below it, where
+        // a street lamp shines
+        vec3 q = r * clamp(b, 0.0, len) - c;
+        float d = length(q);
+        float fade = 1.0 - clamp(d / reach, 0.0, 1.0);
+        float below = 0.35 + 0.65 * smoothstep(-0.2, 0.7, dot(q, -uUp) / max(d, 0.0001));
+        sum += uLamps[2 * i + 1].rgb * (uLamps[2 * i + 1].w * 0.02 * reach * scatter * fade * fade * below);
+    }
+    return sum;
+}
+
 // The scene lit: ambient occlusion, the sun's shadows and highlights, reflections, wet ground
 vec3 litScene(vec2 p, vec2 size) {
     vec3 c = texelFetch(uColour, ivec2(p), 0).rgb;
@@ -704,6 +738,9 @@ vec3 litScene(vec2 p, vec2 size) {
     }
     if (uWet > 0.0) {
         c += wetGround(p, size);
+    }
+    if (uLampCount > 0) {
+        c += lampHaze(p);
     }
     return c;
 }

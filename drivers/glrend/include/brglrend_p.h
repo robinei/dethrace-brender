@@ -41,6 +41,8 @@ typedef struct br_gl_post_params {
     float specular;             /* the sun's highlights (in the direction of sun), 0 disables */
     int shimmer_count;          /* heat shimmer above these points: view space position and strength, up to 8 */
     float shimmers[4 * 8];
+    int lamp_count;
+    float lamps[8 * 24]; /* lamps: view space position and size (the reach of their glow), colour and strength */
 } br_gl_post_params;
 
 br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap *screen, br_boolean glow);

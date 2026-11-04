@@ -125,8 +125,13 @@ vec3 spotLight = vec3(0.0);
 // so they show by day too
 vec3 flashLight = vec3(0.0);
 
+// a point light (no direction), a spot (a direction), or a wide cone (a direction twice as long: street lamps)
 float spotCone(vec3 from_light, vec4 dir) {
-    return dot(dir.xyz, dir.xyz) < 0.25 ? 1.0 : smoothstep(0.82, 0.95, dot(from_light, dir.xyz));
+    float k = dot(dir.xyz, dir.xyz);
+    if (k < 0.25) {
+        return 1.0;
+    }
+    return k > 2.0 ? smoothstep(0.25, 0.75, dot(from_light, dir.xyz) * 0.5) : smoothstep(0.82, 0.95, dot(from_light, dir.xyz));
 }
 
 vec3 spotLighting(vec3 p, vec3 n) {
