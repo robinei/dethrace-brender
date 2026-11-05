@@ -121,7 +121,7 @@ typedef struct _VIDEO {
         GLuint program, aoProgram;
         GLint uniforms[64], aoUniforms[8]; /* (see the uniform lists in post.c) */
         GLuint weatherProgram; /* snow and rain particles, see weather.vert.glsl */
-        GLint weatherUniforms[16];
+        GLint weatherUniforms[24];
         /* the view: the largest perspective scene drawn while active */
         int viewArea;
         float view[4]; /* x, y, width, height in window pixels */

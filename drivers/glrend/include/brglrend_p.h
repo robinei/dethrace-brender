@@ -43,6 +43,8 @@ typedef struct br_gl_post_params {
     float shimmers[4 * 8];
     int lamp_count;
     float lamps[8 * 24]; /* lamps: view space position and size (the reach of their glow), colour and strength */
+    int spray_count;
+    float spray[8 * 24]; /* wheels throwing up spray: world position and strength, the car's velocity and a seed */
 } br_gl_post_params;
 
 br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap *screen, br_boolean glow);

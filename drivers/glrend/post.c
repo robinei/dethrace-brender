@@ -46,11 +46,12 @@ static const char* uniform_names[U_COUNT] = {
 };
 enum {
     W_TO_WORLD, W_VIEW, W_PROJ, W_SIZE, W_TIME, W_SCALE, W_RAIN, W_BOX, W_DEPTH, W_NEAR, W_FAR, W_BRIGHTNESS, W_AMOUNT,
-    W_INNER, W_MIN_PIXELS,
+    W_INNER, W_MIN_PIXELS, W_SPRAY, W_SPRAY_COUNT,
     W_COUNT
 };
+typedef char weather_uniforms_fit[W_COUNT <= 24 ? 1 : -1];
 static const char* weather_uniform_names[W_COUNT] = {
-    "uToWorld", "uView", "uProj", "uSize", "uTime", "uScale", "uRain", "uBox", "uDepth", "uNear", "uFar", "uBrightness", "uAmount", "uInner", "uMinPixels"
+    "uToWorld", "uView", "uProj", "uSize", "uTime", "uScale", "uRain", "uBox", "uDepth", "uNear", "uFar", "uBrightness", "uAmount", "uInner", "uMinPixels", "uSpray", "uSprayCount"
 };
 enum {
     A_DEPTH, A_VIEW, A_PROJ, A_NEAR, A_FAR, A_RADIUS, A_AO, A_PASS,
@@ -261,6 +262,17 @@ static void draw_weather(HVIDEO hVideo, const br_gl_post_params* params, int w, 
         glUniform1f(u[W_INNER], layer > 0 ? boxes[layer - 1] : 0.0f);
         glUniform1f(u[W_MIN_PIXELS], least[layer]);
         glDrawArrays(GL_TRIANGLES, 0, count * 6);
+    }
+    /* the spray off the wheels (rain), droplets as the rain's (see weather.vert.glsl) */
+    glUniform1i(u[W_SPRAY_COUNT], 0);
+    if (rain && params->spray_count > 0) {
+        int emitters = params->spray_count < 24 ? params->spray_count : 24;
+        glUniform4fv(u[W_SPRAY], 2 * emitters, params->spray);
+        glUniform1i(u[W_SPRAY_COUNT], emitters);
+        glUniform1f(u[W_MIN_PIXELS], 1.2f);
+        glUniform1f(u[W_AMOUNT], 1.0f);
+        glDrawArrays(GL_TRIANGLES, 0, emitters * 160 * 6);
+        glUniform1i(u[W_SPRAY_COUNT], 0);
     }
     glDisable(GL_BLEND);
 }
