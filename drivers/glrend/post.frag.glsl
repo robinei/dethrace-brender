@@ -259,15 +259,34 @@ vec3 depthNormal(vec2 p, vec3 P) {
     return dot(n, P) > 0.0 ? -n : n;
 }
 
-// the surface's normal at window pixel p (view space point P), facing the viewer: as the scene wrote it, or else
-// from the depths
-vec3 viewNormal(vec2 p, vec3 P) {
-    vec4 t = texelFetch(uNormal, ivec2(p), 0);
+// a written normal at window pixel q, or zero
+vec3 storedNormal(ivec2 q) {
+    vec4 t = texelFetch(uNormal, q, 0);
     vec3 n = t.xyz * 2.0 - 1.0;
-    if (t.a > 0.3 && dot(n, n) > 0.25) {
-        return normalize(n);
+    return t.a > 0.3 && dot(n, n) > 0.25 ? normalize(n) : vec3(0.0);
+}
+
+// the surface's normal at window pixel p (view space point P), facing the viewer: as the scene wrote it, or else
+// from the depths. A pixel wide sliver of a face turned another way (where the track's faces meet, along a seam)
+// takes its neighbours' normal, where those on both sides agree: lit as its own, it showed as a thin line, dark
+// in the sun and light in the shade
+vec3 viewNormal(vec2 p, vec3 P) {
+    ivec2 q = ivec2(p);
+    vec3 n = storedNormal(q);
+    if (dot(n, n) == 0.0) {
+        return depthNormal(p, P);
     }
-    return depthNormal(p, P);
+    vec3 l = storedNormal(q - ivec2(1, 0));
+    vec3 r = storedNormal(q + ivec2(1, 0));
+    if (dot(l, r) > 0.97 && dot(n, l) < 0.85) {
+        return normalize(l + r);
+    }
+    vec3 d = storedNormal(q - ivec2(0, 1));
+    vec3 u = storedNormal(q + ivec2(0, 1));
+    if (dot(d, u) > 0.97 && dot(n, d) < 0.85) {
+        return normalize(d + u);
+    }
+    return n;
 }
 
 // whether the surface at window pixel p is a sprite (a flat card facing the camera, see brender.frag.glsl)
@@ -450,10 +469,6 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float zx, float zy, float ga
     // (the gradient g with dot(g, ax) = zx and dot(g, ay) = zy)
     float det = ax.x * ay.y - ax.y * ay.x;
     vec2 dz = abs(det) > 1e-8 ? vec2(zx * ay.y - zy * ax.y, zy * ax.x - zx * ay.x) / det : vec2(0.0);
-    // the surface may bend away from that plane, gently (up to about 8 degrees), where it folds (where two faces
-    // of the ground meet): more depth allowed the further a sample is, so the fold isn't taken for a caster (it
-    // drew a thin dark line along the fold, coming and going with the distance)
-    float bend = 0.15 * texel * depth_per_unit;
 
     // the search: 6x6 texels around, out to where the softest penumbra would reach (casters up to ~20 units
     // away), at most 16 texels (so thin casters aren't stepped over)
@@ -464,7 +479,7 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float zx, float zy, float ga
         for (int i = 0; i < 6; i++) {
             vec2 o = (vec2(float(i), float(j)) / 5.0 - 0.5) * 2.0 * search;
             float d = shadowDepth(level, clamp(ivec2(floor(f + o + 0.5)), ivec2(0), ivec2(last)));
-            if (d < threshold + dot(dz, o) - bend * length(o)) {
+            if (d < threshold + dot(dz, o)) {
                 blocker += d - dot(dz, o);
                 blockers += 1.0;
             }
@@ -493,7 +508,7 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float zx, float zy, float ga
             float v = ((float(j) + 0.5) / float(ny) - 0.5) * 2.0;
             float w = exp(-2.5 * (u * u + v * v));
             vec2 g = f + a * u + b * v;
-            float tap_threshold = threshold + za * u + zb * v - bend * length(a * u + b * v);
+            float tap_threshold = threshold + za * u + zb * v;
             ivec2 t = ivec2(floor(g));
             vec2 fr = g - floor(g);
             float s00 = shadowDepth(level, clamp(t, ivec2(0), ivec2(last))) < tap_threshold ? 1.0 : 0.0;
