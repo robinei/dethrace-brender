@@ -465,6 +465,9 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, vec2 dz, float gap) {
     // (a texel in world units: the map's width, 2 / its projection's x scale, over its texels)
     float texel = 2.0 / uShadowProj[level][0][0] * uShadowTexel[level];
     int last = int(texels) - 1;
+    // the surface may bend away from its plane (up to about 22 degrees) where two faces of the ground meet: more
+    // depth allowed the further a sample is, so the face beyond a fold isn't taken for a caster
+    float bend = 0.4 * texel * depth_per_unit;
     vec2 f = m.xy * texels - 0.5;
 
     // the search: 6x6 texels around, out to where the softest penumbra would reach (casters up to ~20 units
@@ -476,7 +479,7 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, vec2 dz, float gap) {
         for (int i = 0; i < 6; i++) {
             vec2 o = (vec2(float(i), float(j)) / 5.0 - 0.5) * 2.0 * search;
             float d = shadowDepth(level, clamp(ivec2(floor(f + o + 0.5)), ivec2(0), ivec2(last)));
-            if (d < threshold + dot(dz, o)) {
+            if (d < threshold + dot(dz, o) - bend * length(o)) {
                 blocker += d - dot(dz, o);
                 blockers += 1.0;
             }
@@ -504,7 +507,7 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, vec2 dz, float gap) {
             float w = exp(-2.5 * (u * u + v * v));
             vec2 g = f + a * u + b * v;
             vec2 off = a * u + b * v;
-            float tap_threshold = threshold + dot(dz, off);
+            float tap_threshold = threshold + dot(dz, off) - bend * length(off);
             ivec2 t = ivec2(floor(g));
             vec2 fr = g - floor(g);
             float s00 = shadowDepth(level, clamp(t, ivec2(0), ivec2(last))) < tap_threshold ? 1.0 : 0.0;
@@ -553,14 +556,16 @@ float shadowLevels(vec2 p, vec3 P, vec3 n, float facing, float gap, bool sprite)
         }
         vec2 e = min(m.xy, 1.0 - m.xy) / 0.06;
         float fade = clamp(min(e.x, e.y), 0.0, 1.0);
-        // the footprint: across the pixel, in this map's texels (at most 64 texels, against stray rays)
+        // the footprint: across the pixel, in this map's texels, at most 12 (seen at a low angle a pixel covers a
+        // long strip of the ground, and samples that far reached onto a neighbouring face a little above the
+        // pixel's plane, taken for a caster: a faint shaded patch, growing as the camera backed away)
         vec3 m0 = shadowCoord(level, P);
         vec3 dx = shadowCoord(level, Px) - m0;
         vec3 dy = shadowCoord(level, Py) - m0;
         vec2 ax = dx.xy * texels;
         vec2 ay = dy.xy * texels;
-        float kx = min(1.0, 64.0 / max(length(ax), 1e-6));
-        float ky = min(1.0, 64.0 / max(length(ay), 1e-6));
+        float kx = min(1.0, 12.0 / max(length(ax), 1e-6));
+        float ky = min(1.0, 12.0 / max(length(ay), 1e-6));
         float s = shadowed(level, m, ax * kx, ay * ky, sprite ? vec2(0.0) : depthSlope(level, P, n, texel, m0.z), gap);
         result += remaining * fade * s;
         remaining *= 1.0 - fade;
