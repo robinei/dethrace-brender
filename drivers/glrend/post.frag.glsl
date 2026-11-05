@@ -353,36 +353,51 @@ vec3 wetGround(vec2 p, vec2 size) {
         rings = rainRings(w) * near * min(uRain, 1.5) * (1.0 - grass);
         crests = vec3(0.8, 0.85, 0.9) * (0.06 * length(rings) * (0.4 + 0.6 * grazing) * flat_ground * uWet * (0.4 + 0.6 * wet));
     }
-    bool to_sky;
-    vec2 last;
-    vec2 hit = traceReflection(P, uUp, reflect(v, uUp), p, 1.0, to_sky, last);
-    if (hit.x < 0.0) {
-        return crests;
-    }
     // the water lies over ground that isn't quite flat, its surface smoothed by the surface tension: the
     // reflection gently warped, in long smooth swells anchored to the ground (still), less far off
     vec2 swell = vec2(valueNoise2(w * 3.1 + 11.0) + 0.5 * valueNoise2(w * 7.3 + 3.0),
                       valueNoise2(w * 2.7 + 29.0) + 0.5 * valueNoise2(w * 6.9 + 17.0)) - 0.75;
-    hit += swell * vec2(10.0, 16.0) * uScale / (1.0 + 0.15 * -P.z);
-    hit += rings * vec2(5.0, 8.0) * uScale / (1.0 + 0.3 * -P.z);
+    vec2 shift = swell * vec2(10.0, 16.0) * uScale / (1.0 + 0.15 * -P.z) + rings * vec2(5.0, 8.0) * uScale / (1.0 + 0.3 * -P.z);
     // the surface's grain jitters where the reflection is looked up, only where it is just damp (the puddles
     // reflect cleanly)
     vec2 grain = vec2(hash12(p), hash12(p + 17.3)) - 0.5;
-    hit += grain * vec2(2.0, 4.0) * uScale * rough;
-    vec3 sum = vec3(0.0);
+    shift += grain * vec2(2.0, 4.0) * uScale * rough;
     // smeared towards the viewer as on wet asphalt (in the puddles, a little), and sideways where damp
     float stretch = (0.0025 + 0.004 * rough) * uView.w;
     float spread = 0.003 * rough * uView.w;
     // (the glow's mip level: the puddles' reflections sharp, the damp rest's softer)
     float lod = mix(1.0, 2.6, rough);
-    for (int k = -4; k <= 4; k++) {
-        float weight = 1.0 - abs(float(k)) / 5.0;
-        float side = (fract(float(k) * 0.618 + 0.31) - 0.5) * 2.0;
-        sum += textureLod(uGlow, (hit + vec2(side * spread, float(k) * stretch)) / size, lod).rgb * weight;
+    // the reflection of the pixel and of those a little above and below it on the ground (the smear across
+    // them too): where the rays jump from one thing to another (from the lit windows of a building to the
+    // pavement in front of it) a short fade rather than a hard line across the smeared reflections
+    vec3 sum = vec3(0.0);
+    float rays = 0.0;
+    for (int r = -1; r <= 1; r++) {
+        vec2 q = p + vec2(0.0, float(r) * 2.5 * stretch);
+        vec3 Q = r == 0 ? P : viewPosition(q);
+        float wr = r == 0 ? 2.0 : 1.0;
+        if (r != 0 && (texelFetch(uDepth, ivec2(q), 0).r >= 1.0 || flatGround(q, Q) <= 0.0)) {
+            continue;
+        }
+        rays += wr;
+        bool to_sky;
+        vec2 last;
+        vec2 hit = traceReflection(Q, uUp, reflect(normalize(Q), uUp), q, 1.0, to_sky, last);
+        if (hit.x < 0.0) {
+            continue;
+        }
+        hit += shift;
+        vec3 one = vec3(0.0);
+        for (int k = -4; k <= 4; k++) {
+            float weight = 1.0 - abs(float(k)) / 5.0;
+            float side = (fract(float(k) * 0.618 + 0.31) - 0.5) * 2.0;
+            one += textureLod(uGlow, (hit + vec2(side * spread, float(k) * stretch)) / size, lod).rgb * weight;
+        }
+        sum += one / 5.0 * edgeFade(hit) * wr;
     }
-    sum /= 5.0;
+    sum /= max(rays, 1.0);
     float fresnel = 0.15 + 0.85 * grazing * grazing * grazing;
-    return crests + sum * fresnel * flat_ground * edgeFade(hit) * uWet * (0.3 + 0.7 * wet) * (1.0 - 0.85 * grass);
+    return crests + sum * fresnel * flat_ground * uWet * (0.3 + 0.7 * wet) * (1.0 - 0.85 * grass);
 }
 
 // the ripples on water at view space point P: how they shift its mirror image, in window pixels
