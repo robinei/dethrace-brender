@@ -422,6 +422,26 @@ vec3 shadowCoord(int level, vec3 P) {
     return clip.xyz / clip.w * 0.5 + 0.5;
 }
 
+// The surface's depth change in the map of `level` per texel along the map's axes: from its plane (view space
+// point P, normal n), a texel along each axis on it. (It was solved from the pixel's footprint, which along a
+// line on the screen, where the footprint's two sides ran the same way in the map, gave way: a thin line with
+// the shadow inverted, moving with the camera)
+vec2 depthSlope(int level, vec3 P, vec3 n, float texel, float z0) {
+    // the map's axes, in view space (the rows of the world to map transform, turned into view space)
+    vec3 wx = vec3(uShadowView[4 * level][0], uShadowView[4 * level + 1][0], uShadowView[4 * level + 2][0]);
+    vec3 wy = vec3(uShadowView[4 * level][1], uShadowView[4 * level + 1][1], uShadowView[4 * level + 2][1]);
+    vec3 wz = vec3(uShadowView[4 * level][2], uShadowView[4 * level + 1][2], uShadowView[4 * level + 2][2]);
+    vec3 vx = vec3(dot(wx, uToWorld[0]), dot(wx, uToWorld[1]), dot(wx, uToWorld[2]));
+    vec3 vy = vec3(dot(wy, uToWorld[0]), dot(wy, uToWorld[1]), dot(wy, uToWorld[2]));
+    vec3 vz = vec3(dot(wz, uToWorld[0]), dot(wz, uToWorld[1]), dot(wz, uToWorld[2]));
+    // (stepping along the map's depth to stay on the plane; faces almost along the sun are in shadow anyway)
+    float nz = dot(n, vz);
+    nz = sign(nz) * max(abs(nz), 0.05) + (nz == 0.0 ? 0.05 : 0.0);
+    vec3 px = P + texel * (vx - vz * dot(n, vx) / nz);
+    vec3 py = P + texel * (vy - vz * dot(n, vy) / nz);
+    return vec2(shadowCoord(level, px).z - z0, shadowCoord(level, py).z - z0);
+}
+
 // a vector at least `least` long, in its direction
 vec2 atLeast(vec2 v, float least) {
     float l = length(v);
@@ -437,7 +457,7 @@ vec2 atLeast(vec2 v, float least) {
 // changes across the pixel, so each tap compares with the surface's own depth there (else on surfaces sloping
 // from the sun a wide filter shadowed them with themselves). Only what is more than `gap` (world units) nearer the
 // sun counts
-float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float zx, float zy, float gap) {
+float shadowed(int level, vec3 m, vec2 ax, vec2 ay, vec2 dz, float gap) {
     // (the map's depth is linear over its depth range: 2 / its projection's z scale, so a world unit is this much)
     float depth_per_unit = abs(uShadowProj[level][2][2]) * 0.5;
     float threshold = m.z - gap * depth_per_unit - 0.00005;
@@ -446,15 +466,6 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float zx, float zy, float ga
     float texel = 2.0 / uShadowProj[level][0][0] * uShadowTexel[level];
     int last = int(texels) - 1;
     vec2 f = m.xy * texels - 0.5;
-    // the surface's depth change per texel along the map's axes (from the footprint), for the search
-    // (the gradient g with dot(g, ax) = zx and dot(g, ay) = zy)
-    float det = ax.x * ay.y - ax.y * ay.x;
-    vec2 dz = abs(det) > 1e-8 ? vec2(zx * ay.y - zy * ax.y, zy * ax.x - zx * ay.x) / det : vec2(0.0);
-    // the surface may bend away from that plane (up to about 22 degrees) where two faces of the ground meet: more
-    // depth allowed the further a sample is, so the face beyond a fold isn't taken for a caster. (Seen at a low
-    // angle a pixel's footprint is long, and from far enough away it reached across a fold: a faint shaded patch
-    // up to the fold, growing as the camera backed away)
-    float bend = 0.4 * texel * depth_per_unit;
 
     // the search: 6x6 texels around, out to where the softest penumbra would reach (casters up to ~20 units
     // away), at most 16 texels (so thin casters aren't stepped over)
@@ -465,7 +476,7 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float zx, float zy, float ga
         for (int i = 0; i < 6; i++) {
             vec2 o = (vec2(float(i), float(j)) / 5.0 - 0.5) * 2.0 * search;
             float d = shadowDepth(level, clamp(ivec2(floor(f + o + 0.5)), ivec2(0), ivec2(last)));
-            if (d < threshold + dot(dz, o) - bend * length(o)) {
+            if (d < threshold + dot(dz, o)) {
                 blocker += d - dot(dz, o);
                 blockers += 1.0;
             }
@@ -481,8 +492,6 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float zx, float zy, float ga
     // the filter: the penumbra wide, and at least the footprint
     vec2 a = atLeast(ax, penumbra);
     vec2 b = atLeast(ay, penumbra);
-    float za = zx * min(length(a) / max(length(ax), 1e-6), 64.0);
-    float zb = zy * min(length(b) / max(length(ay), 1e-6), 64.0);
     int nx = int(clamp(ceil(length(a)) + 1.0, 4.0, 7.0));
     int ny = int(clamp(ceil(length(b)) + 1.0, 4.0, 7.0));
     float sum = 0.0;
@@ -494,7 +503,8 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float zx, float zy, float ga
             float v = ((float(j) + 0.5) / float(ny) - 0.5) * 2.0;
             float w = exp(-2.5 * (u * u + v * v));
             vec2 g = f + a * u + b * v;
-            float tap_threshold = threshold + za * u + zb * v - bend * length(a * u + b * v);
+            vec2 off = a * u + b * v;
+            float tap_threshold = threshold + dot(dz, off);
             ivec2 t = ivec2(floor(g));
             vec2 fr = g - floor(g);
             float s00 = shadowDepth(level, clamp(t, ivec2(0), ivec2(last))) < tap_threshold ? 1.0 : 0.0;
@@ -551,7 +561,7 @@ float shadowLevels(vec2 p, vec3 P, vec3 n, float facing, float gap, bool sprite)
         vec2 ay = dy.xy * texels;
         float kx = min(1.0, 64.0 / max(length(ax), 1e-6));
         float ky = min(1.0, 64.0 / max(length(ay), 1e-6));
-        float s = shadowed(level, m, ax * kx, ay * ky, sprite ? 0.0 : dx.z * kx, sprite ? 0.0 : dy.z * ky, gap);
+        float s = shadowed(level, m, ax * kx, ay * ky, sprite ? vec2(0.0) : depthSlope(level, P, n, texel, m0.z), gap);
         result += remaining * fade * s;
         remaining *= 1.0 - fade;
         if (remaining <= 0.001) {
