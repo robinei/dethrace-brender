@@ -405,11 +405,6 @@ vec3 toWorld(vec3 P) {
 }
 
 float shadowDepth(int level, ivec2 t) {
-    // (beyond the map's edge, where a filter near it reaches: nothing there, rather than whatever an out of range
-    // fetch gives, which drew a thin shadow line along the edge)
-    if (t.x < 0 || t.y < 0 || float(t.x) * uShadowTexel[level] >= 1.0 || float(t.y) * uShadowTexel[level] >= 1.0) {
-        return 1.0;
-    }
     if (level == 0) {
         return texelFetch(uShadowMap[0], t, 0).r;
     } else if (level == 1) {
