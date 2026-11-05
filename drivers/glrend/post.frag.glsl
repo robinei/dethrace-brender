@@ -85,7 +85,9 @@ float blur(vec2 p) {
     if (d >= 1.0) {
         return 1.0; // nothing drawn: background, most distant
     }
-    return clamp((linearDepth(d) - uStart) / max(uEnd - uStart, 0.0001), 0.0, 1.0);
+    // easing in: the middle distance stays sharp, the blur comes on towards the far end
+    float t = clamp((linearDepth(d) - uStart) / max(uEnd - uStart, 0.0001), 0.0, 1.0);
+    return t * t;
 }
 
 // Depth of field, of the far distance only (nothing nearer is blurred, so nothing blurs over what is sharp): a
