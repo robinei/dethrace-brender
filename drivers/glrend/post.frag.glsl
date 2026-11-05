@@ -455,6 +455,10 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float zx, float zy, float ga
     // (the gradient g with dot(g, ax) = zx and dot(g, ay) = zy)
     float det = ax.x * ay.y - ax.y * ay.x;
     vec2 dz = abs(det) > 1e-8 ? vec2(zx * ay.y - zy * ax.y, zy * ax.x - zx * ay.x) / det : vec2(0.0);
+    // the surface may bend away from that plane, gently (up to about 8 degrees), where it folds (where two faces
+    // of the ground meet): more depth allowed the further a sample is, so the fold isn't taken for a caster (it
+    // drew a thin dark line along the fold, coming and going with the distance)
+    float bend = 0.15 * texel * depth_per_unit;
 
     // the search: 6x6 texels around, out to where the softest penumbra would reach (casters up to ~20 units
     // away), at most 16 texels (so thin casters aren't stepped over)
@@ -465,7 +469,7 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float zx, float zy, float ga
         for (int i = 0; i < 6; i++) {
             vec2 o = (vec2(float(i), float(j)) / 5.0 - 0.5) * 2.0 * search;
             float d = shadowDepth(level, clamp(ivec2(floor(f + o + 0.5)), ivec2(0), ivec2(last)));
-            if (d < threshold + dot(dz, o)) {
+            if (d < threshold + dot(dz, o) - bend * length(o)) {
                 blocker += d - dot(dz, o);
                 blockers += 1.0;
             }
@@ -494,7 +498,7 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, float zx, float zy, float ga
             float v = ((float(j) + 0.5) / float(ny) - 0.5) * 2.0;
             float w = exp(-2.5 * (u * u + v * v));
             vec2 g = f + a * u + b * v;
-            float tap_threshold = threshold + za * u + zb * v;
+            float tap_threshold = threshold + za * u + zb * v - bend * length(a * u + b * v);
             ivec2 t = ivec2(floor(g));
             vec2 fr = g - floor(g);
             float s00 = shadowDepth(level, clamp(t, ivec2(0), ivec2(last))) < tap_threshold ? 1.0 : 0.0;
