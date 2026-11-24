@@ -614,7 +614,19 @@ void StoredGLRenderGroup(br_geometry_stored* self, br_renderer* renderer, const 
     if (hVideo->sceneLightCount > 0 && !hVideo->shadow.active) {
         draw_spots(hVideo, self->model, &renderer->state.current->matrix.model_to_view);
     }
-    glBufferData(GL_UNIFORM_BUFFER, sizeof(model), &model, GL_STATIC_DRAW);
+    {
+        /* the model state at the next free place in the ring (see video.h), in a fresh buffer when it is full */
+        GLsizeiptr align = hVideo->brenderProgram.uboModelAlign;
+        GLsizeiptr at = (hVideo->brenderProgram.uboModelUsed + align - 1) / align * align;
+        if (at + (GLsizeiptr)sizeof(model) > hVideo->brenderProgram.uboModelSize) {
+            glBufferData(GL_UNIFORM_BUFFER, hVideo->brenderProgram.uboModelSize, NULL, GL_STREAM_DRAW);
+            at = 0;
+        }
+        glBufferSubData(GL_UNIFORM_BUFFER, at, sizeof(model), &model);
+        glBindBufferRange(GL_UNIFORM_BUFFER, hVideo->brenderProgram.blockBindingModel, hVideo->brenderProgram.uboModel,
+            at, sizeof(model));
+        hVideo->brenderProgram.uboModelUsed = at + sizeof(model);
+    }
     glDrawElements(GL_TRIANGLES, groupinfo->count, GL_UNSIGNED_SHORT, groupinfo->offset);
 
     renderer->scene_stats.face_group_count++;

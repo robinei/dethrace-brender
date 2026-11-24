@@ -98,7 +98,14 @@ static void VIDEOI_GetShaderVariables(HVIDEO hVideo) {
     glUniformBlockBinding(hVideo->brenderProgram.program, hVideo->brenderProgram.blockIndexModel,
         hVideo->brenderProgram.blockBindingModel);
     glBindBufferBase(GL_UNIFORM_BUFFER, hVideo->brenderProgram.blockBindingModel, hVideo->brenderProgram.uboModel);
-    glBufferData(GL_UNIFORM_BUFFER, sizeof(shader_data_model), NULL, GL_DYNAMIC_DRAW);
+    /* (room for a few thousand draws) */
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &hVideo->brenderProgram.uboModelAlign);
+    if (hVideo->brenderProgram.uboModelAlign < 1) {
+        hVideo->brenderProgram.uboModelAlign = 256;
+    }
+    hVideo->brenderProgram.uboModelSize = 4 * 1024 * 1024;
+    hVideo->brenderProgram.uboModelUsed = 0;
+    glBufferData(GL_UNIFORM_BUFFER, hVideo->brenderProgram.uboModelSize, NULL, GL_STREAM_DRAW);
 
     hVideo->brenderProgram.attributes.aPosition = glGetAttribLocation(hVideo->brenderProgram.program, "aPosition");
     hVideo->brenderProgram.attributes.aUV = glGetAttribLocation(hVideo->brenderProgram.program, "aUV");

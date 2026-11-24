@@ -88,6 +88,10 @@ typedef struct _VIDEO {
         GLuint blockBindingScene;
 
         GLuint uboModel;
+        /* (a ring: each draw's model state at the next free place in it, so the buffer isn't made anew per draw
+         * (see StoredGLRenderGroup); from the start again, in a fresh buffer, when it is full) */
+        GLsizeiptr uboModelSize, uboModelUsed;
+        GLint uboModelAlign;
         GLuint blockIndexModel;
         GLuint blockBindingModel;
 
