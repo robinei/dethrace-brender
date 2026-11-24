@@ -139,6 +139,8 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
         if (count > BR_GL_MAX_SCENE_LIGHTS) {
             count = BR_GL_MAX_SCENE_LIGHTS;
         }
+        hVideo->sceneLights = lights;
+        hVideo->sceneLightCount = lights != NULL ? count : 0;
         if (hVideo->sceneSurface == NULL || !hVideo->sceneSurface(surface)) {
             surface[3] = surface[7] = surface[11] = surface[13] = 0.0f;
         }
@@ -151,6 +153,9 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
             glUniform1i(u->soft_depth, 2);
             glUniform1f(u->scene_brightness, brightness);
             glUniform1i(u->num_spots, lights != NULL ? count : 0);
+            /* (each draw gives those of them that reach it, see StoredGLRenderGroup) */
+            glUniform1i(u->num_draw_spots, 0);
+            hVideo->variant->drawSpotCount = 0;
             if (lights != NULL && count > 0) {
                 glUniform4fv(u->spots, 3 * count, lights);
             }

@@ -28,6 +28,8 @@ typedef struct brender_uniforms {
     GLint scene_brightness;  /* float */
     GLint num_spots;         /* int */
     GLint spots;             /* vec4[3 * MAX] */
+    GLint num_draw_spots;    /* int */
+    GLint draw_spots;        /* int[MAX] */
     GLint surface_sun;       /* vec4 */
     GLint surface_up;        /* vec4 */
     GLint surface_haze;      /* vec4[2] */
@@ -105,7 +107,10 @@ typedef struct _VIDEO {
         GLuint program;
         brender_uniforms uniforms;
         float surfaceUploaded[BR_GL_SCENE_SURFACE_FLOATS]; /* the scene_surface parameters last given to it */
+        int drawSpots[BR_GL_MAX_SCENE_LIGHTS], drawSpotCount; /* the draw_spots last given to it */
     } variants[BRENDER_VARIANTS], *variant; /* (the one in use) */
+    const float* sceneLights; /* the scene's lights (spots), as the scene_lighting callback gave them */
+    int sceneLightCount;
     int sceneClipPlanes; /* the scene being drawn has clip planes (only BRENDER_FULL clips) */
 
     GLint sampleBuffers; /* Non-zero if the default framebuffer is multisampled */

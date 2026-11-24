@@ -479,6 +479,61 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
     GL_CHECK_ERROR();
 }
 
+/*
+ * The scene's lights (spots, see brender.frag.glsl) that can reach the model being drawn: its surface (within a
+ * light's range of its bounding sphere; a blob shadow's reaches a little further) or, for those that light up the
+ * air (haze), the air between it and the eye (the range around the line from the eye to its centre). Given to
+ * the program as draw_spots, so the fragments only go through those
+ */
+static void draw_spots(HVIDEO hVideo, struct v11model* model, br_matrix34* m2v) {
+    int list[BR_GL_MAX_SCENE_LIGHTS];
+    int n = 0;
+    br_vector3 c;
+    float r, scale, cc;
+    int i;
+
+    if (model != NULL) {
+        BrMatrix34ApplyP(&c, &model->centre, m2v);
+        scale = 0.0f;
+        for (i = 0; i < 3; i++) {
+            float l = BrVector3Length((br_vector3*)m2v->m[i]);
+            scale = l > scale ? l : scale;
+        }
+        r = model->centred_radius * scale;
+    } else {
+        BrVector3Set(&c, 0.0f, 0.0f, 0.0f);
+        r = 1e30f;
+    }
+    cc = BrVector3Dot(&c, &c);
+    for (i = 0; i < hVideo->sceneLightCount; i++) {
+        const float* light = hVideo->sceneLights + BR_GL_SCENE_LIGHT_FLOATS * i;
+        float range = light[3];
+        float reach = (range >= 0.0f ? range : -1.3f * range) + r;
+        float dx = light[0] - c.v[0], dy = light[1] - c.v[1], dz = light[2] - c.v[2];
+        int reaches = dx * dx + dy * dy + dz * dz < reach * reach;
+        if (!reaches && range > 0.0f && light[11] > 0.0f) {
+            /* (the nearest point to it of the line from the eye to the centre) */
+            float t = cc > 0.0f ? (light[0] * c.v[0] + light[1] * c.v[1] + light[2] * c.v[2]) / cc : 0.0f;
+            t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+            dx = light[0] - c.v[0] * t;
+            dy = light[1] - c.v[1] * t;
+            dz = light[2] - c.v[2] * t;
+            reaches = dx * dx + dy * dy + dz * dz < (range + r) * (range + r);
+        }
+        if (reaches) {
+            list[n++] = i;
+        }
+    }
+    if (n != hVideo->variant->drawSpotCount || memcmp(list, hVideo->variant->drawSpots, n * sizeof(int)) != 0) {
+        glUniform1i(hVideo->variant->uniforms.num_draw_spots, n);
+        if (n > 0) {
+            glUniform1iv(hVideo->variant->uniforms.draw_spots, n, list);
+        }
+        memcpy(hVideo->variant->drawSpots, list, n * sizeof(int));
+        hVideo->variant->drawSpotCount = n;
+    }
+}
+
 void StoredGLRenderGroup(br_geometry_stored* self, br_renderer* renderer, const gl_groupinfo* groupinfo) {
     state_cache* cache = &renderer->state.cache;
     br_device_pixelmap* screen = renderer->pixelmap->screen;
@@ -555,6 +610,9 @@ void StoredGLRenderGroup(br_geometry_stored* self, br_renderer* renderer, const 
         }
         memcpy(hVideo->shadow.proj[hVideo->shadow.level], &cache->model.p, sizeof(hVideo->shadow.proj[0]));
         hVideo->shadow.valid[hVideo->shadow.level] = 1;
+    }
+    if (hVideo->sceneLightCount > 0 && !hVideo->shadow.active) {
+        draw_spots(hVideo, self->model, &renderer->state.current->matrix.model_to_view);
     }
     glBufferData(GL_UNIFORM_BUFFER, sizeof(model), &model, GL_STATIC_DRAW);
     glDrawElements(GL_TRIANGLES, groupinfo->count, GL_UNSIGNED_SHORT, groupinfo->offset);

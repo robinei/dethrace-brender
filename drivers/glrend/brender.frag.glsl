@@ -118,6 +118,9 @@ uniform bool surface_soft;
 #define MAX_SPOTS 32
 uniform float scene_brightness;
 uniform int num_spots;
+// those of them that can reach what is being drawn, or the air between it and the eye (see StoredGLRenderGroup)
+uniform int num_draw_spots;
+uniform int draw_spots[MAX_SPOTS];
 uniform vec4 spots[3 * MAX_SPOTS];
 // how much the lights light this fragment; also lifts the darkness depth cue
 vec3 spotLight = vec3(0.0);
@@ -136,7 +139,8 @@ float spotCone(vec3 from_light, vec4 dir) {
 
 vec3 spotLighting(vec3 p, vec3 n) {
     vec3 sum = vec3(0.0);
-    for (int i = 0; i < num_spots; i++) {
+    for (int k = 0; k < num_draw_spots; k++) {
+        int i = draw_spots[k];
         vec3 to_light = spots[3 * i].xyz - p;
         float d = length(to_light);
         float range = spots[3 * i].w;
@@ -164,7 +168,8 @@ float blobShadow(vec3 p, vec3 n) {
     if (!(dot(n, n) > 0.01)) {
         return 1.0;
     }
-    for (int i = 0; i < num_spots; i++) {
+    for (int k = 0; k < num_draw_spots; k++) {
+        int i = draw_spots[k];
         float radius = -spots[3 * i].w;
         if (radius <= 0.0) {
             continue;
@@ -321,7 +326,8 @@ vec3 spotHaze(vec3 p) {
     vec3 sum = vec3(0.0);
     float len = length(p);
     vec3 r = p / max(len, 0.0001);
-    for (int i = 0; i < num_spots; i++) {
+    for (int k = 0; k < num_draw_spots; k++) {
+        int i = draw_spots[k];
         float haze = spots[3 * i + 2].w;
         if (haze <= 0.0) {
             continue;

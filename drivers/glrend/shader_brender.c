@@ -20,6 +20,8 @@ static void get_uniforms(GLuint program, brender_uniforms* u) {
     u->scene_brightness = glGetUniformLocation(program, "scene_brightness");
     u->num_spots = glGetUniformLocation(program, "num_spots");
     u->spots = glGetUniformLocation(program, "spots");
+    u->num_draw_spots = glGetUniformLocation(program, "num_draw_spots");
+    u->draw_spots = glGetUniformLocation(program, "draw_spots");
     u->surface_sun = glGetUniformLocation(program, "surface_sun");
     u->surface_up = glGetUniformLocation(program, "surface_up");
     u->surface_haze = glGetUniformLocation(program, "surface_haze");
