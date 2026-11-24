@@ -4,6 +4,7 @@ precision highp float;
 ##endif
 ##ifdef GL_CORE
 #version 140
+#extension GL_ARB_texture_gather : enable
 ##endif
 
 // Post-processing of a view (see post.c), in this order: heat shimmer, depth of field, ambient occlusion,
@@ -428,6 +429,27 @@ float shadowDepth(int level, ivec2 t) {
     return texelFetch(uShadowMap[2], t, 0).r;
 }
 
+// The depths of the 2x2 texels of map `level` from t to t + 1 (x: (0, 1), y: (1, 1), z: (1, 0), w: (0, 0)), held
+// to the map's edges: in one read where there is textureGather
+vec4 shadowDepths(int level, ivec2 t) {
+#ifdef GL_ARB_texture_gather
+    // (where the 4 texels' centres meet; the maps clamp to their edges)
+    vec2 uv = vec2(t + 1) * uShadowTexel[level];
+    if (level == 0) {
+        return textureGather(uShadowMap[0], uv);
+    } else if (level == 1) {
+        return textureGather(uShadowMap[1], uv);
+    }
+    return textureGather(uShadowMap[2], uv);
+#else
+    ivec2 last = ivec2(int(1.0 / uShadowTexel[level]) - 1);
+    return vec4(shadowDepth(level, clamp(t + ivec2(0, 1), ivec2(0), last)),
+                shadowDepth(level, clamp(t + ivec2(1, 1), ivec2(0), last)),
+                shadowDepth(level, clamp(t + ivec2(1, 0), ivec2(0), last)),
+                shadowDepth(level, clamp(t, ivec2(0), last)));
+#endif
+}
+
 // view space point P in the map of `level`: its coordinates and depth (0..1)
 vec3 shadowCoord(int level, vec3 P) {
     vec3 w = toWorld(P);
@@ -525,11 +547,8 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, vec2 dz, float gap) {
             float tap_threshold = threshold + dot(dz, off) - bend * length(off);
             ivec2 t = ivec2(floor(g));
             vec2 fr = g - floor(g);
-            float s00 = shadowDepth(level, clamp(t, ivec2(0), ivec2(last))) < tap_threshold ? 1.0 : 0.0;
-            float s10 = shadowDepth(level, clamp(t + ivec2(1, 0), ivec2(0), ivec2(last))) < tap_threshold ? 1.0 : 0.0;
-            float s01 = shadowDepth(level, clamp(t + ivec2(0, 1), ivec2(0), ivec2(last))) < tap_threshold ? 1.0 : 0.0;
-            float s11 = shadowDepth(level, clamp(t + ivec2(1, 1), ivec2(0), ivec2(last))) < tap_threshold ? 1.0 : 0.0;
-            sum += w * mix(mix(s00, s10, fr.x), mix(s01, s11, fr.x), fr.y);
+            vec4 s = vec4(lessThan(shadowDepths(level, t), vec4(tap_threshold)));
+            sum += w * mix(mix(s.w, s.z, fr.x), mix(s.x, s.y, fr.x), fr.y);
             weights += w;
         }
     }
