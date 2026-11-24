@@ -24,7 +24,8 @@ int glContextIsOpenGLES() {
 // Wrap opengles only lines with ##ifdef GL_ES ... ##endif
 // Wrap opengl core only lines with ##ifdef GL_CORE ... ##endif
 // Note the double "##" to avoid collision with the standard glsl preprocessor
-char* preprocessShader(char* shader, size_t size) {
+// defines (if any) go in after the #version line, e.g. "#define SHADOW_PASS\n"
+char* preprocessShader(const char* shader, size_t size, const char* defines) {
     int i;
     char *processed;
     int line_i;
@@ -35,7 +36,7 @@ char* preprocessShader(char* shader, size_t size) {
     line_i = 0;
     filter_state = 0;
     is_context_opengles = glContextIsOpenGLES();
-    processed = BrScratchAllocate(size);
+    processed = BrScratchAllocate(size + (defines != NULL ? strlen(defines) : 0) + 1);
     processed[0] = '\0';
 
     for (i = 0; i < size; i++) {
@@ -58,6 +59,9 @@ char* preprocessShader(char* shader, size_t size) {
                 } else if (filter_state == 0) {
                     strcat(processed, line);
                 }
+                if (defines != NULL && strncmp(line, "#version", 8) == 0 && filter_state != (is_context_opengles ? 2 : 1)) {
+                    strcat(processed, defines);
+                }
             }
             if (shader[i] == '\r' && shader[i+1] == '\n') {
                 i++;
@@ -71,18 +75,21 @@ char* preprocessShader(char* shader, size_t size) {
 }
 
 GLuint VIDEOI_CreateAndCompileShader(const char *name, GLenum type, const char* shader, size_t size) {
+    return VIDEOI_CreateAndCompileShaderDefines(name, type, shader, size, NULL);
+}
+
+GLuint VIDEOI_CreateAndCompileShaderDefines(const char *name, GLenum type, const char* shader, size_t size, const char* defines) {
     GLuint s;
-    GLint _size, status;
+    GLint status;
     char *processed_shader;
 
     ASSERT(type == GL_VERTEX_SHADER || type == GL_FRAGMENT_SHADER);
 
-    // processed_shader was alloc'd from scratch
-    processed_shader = preprocessShader(shader, size);
+    // processed_shader was alloc'd from scratch (NUL terminated)
+    processed_shader = preprocessShader(shader, size, defines);
 
     s = glCreateShader(type);
-    _size = (GLint)size;
-    glShaderSource(s, 1, (const GLchar * const *)&processed_shader, &_size);
+    glShaderSource(s, 1, (const GLchar * const *)&processed_shader, NULL);
     glCompileShader(s);
 
     BrScratchFree(processed_shader);

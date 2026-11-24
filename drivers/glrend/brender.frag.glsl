@@ -545,6 +545,12 @@ void main() {
         }
     }
 
+#ifdef SHADOW_PASS
+    // the sun's shadow maps: only the depth is kept, and the cut-outs above are all that changes it
+    fragColour = vec4(0.0);
+    return;
+#endif
+
     if (lighting == 1u) {
         fragColour.rgb = colour.rgb * textureColour.rgb;
     } else {

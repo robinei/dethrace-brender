@@ -18,6 +18,7 @@ HVIDEO VIDEO_Open(HVIDEO hVideo, const char* vertShader, const char* fragShader)
 void VIDEO_Close(HVIDEO hVideo);
 
 GLuint VIDEOI_CreateAndCompileShader(const char* name, GLenum type, const char* shader, size_t size);
+GLuint VIDEOI_CreateAndCompileShaderDefines(const char* name, GLenum type, const char* shader, size_t size, const char* defines);
 
 /* post.c */
 void PostProcessRecordScene(HVIDEO hVideo, int x, int y, int w, int h, const br_matrix4* view_to_screen, br_token hint,

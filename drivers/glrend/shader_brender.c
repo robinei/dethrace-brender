@@ -4,6 +4,85 @@
 #include "brender.frag.glsl.h"
 #include "brender.vert.glsl.h"
 
+static void get_uniforms(GLuint program, brender_uniforms* u) {
+    u->main_texture = glGetUniformLocation(program, "main_texture");
+    u->sharp_filter = glGetUniformLocation(program, "sharp_filter");
+    u->alpha_to_coverage = glGetUniformLocation(program, "alpha_to_coverage");
+    u->fog_distance = glGetUniformLocation(program, "fog_distance");
+    u->glow_texture = glGetUniformLocation(program, "glow_texture");
+    u->glow_intensity = glGetUniformLocation(program, "glow_intensity");
+    u->surface_reflect = glGetUniformLocation(program, "surface_reflect");
+    u->soft_depth = glGetUniformLocation(program, "soft_depth");
+    u->soft_distance = glGetUniformLocation(program, "soft_distance");
+    u->surface_wear = glGetUniformLocation(program, "surface_wear");
+    u->surface_sprite = glGetUniformLocation(program, "surface_sprite");
+    u->surface_soft = glGetUniformLocation(program, "surface_soft");
+    u->scene_brightness = glGetUniformLocation(program, "scene_brightness");
+    u->num_spots = glGetUniformLocation(program, "num_spots");
+    u->spots = glGetUniformLocation(program, "spots");
+    u->surface_sun = glGetUniformLocation(program, "surface_sun");
+    u->surface_up = glGetUniformLocation(program, "surface_up");
+    u->surface_haze = glGetUniformLocation(program, "surface_haze");
+}
+
+/*
+ * brender.vert/frag built with `defines`, its attributes where brenderProgram has them (the geometry's vertex arrays
+ * are set up for those) and its uniform blocks at the same bindings
+ */
+static GLuint compile_variant(HVIDEO hVideo, const char* name, const char* defines, brender_uniforms* u) {
+    static const char* attributes[] = { "aPosition", "aUV", "aNormal", "aColour" };
+    GLint locations[4];
+    GLuint vert, frag, program;
+    GLint status;
+    GLuint block;
+    int i;
+
+    locations[0] = hVideo->brenderProgram.attributes.aPosition;
+    locations[1] = hVideo->brenderProgram.attributes.aUV;
+    locations[2] = hVideo->brenderProgram.attributes.aNormal;
+    locations[3] = hVideo->brenderProgram.attributes.aColour;
+    vert = VIDEOI_CreateAndCompileShaderDefines(name, GL_VERTEX_SHADER, BRENDER_VERT_GLSL, sizeof(BRENDER_VERT_GLSL), defines);
+    frag = VIDEOI_CreateAndCompileShaderDefines(name, GL_FRAGMENT_SHADER, BRENDER_FRAG_GLSL, sizeof(BRENDER_FRAG_GLSL), defines);
+    if (!vert || !frag) {
+        glDeleteShader(vert);
+        glDeleteShader(frag);
+        return 0;
+    }
+    program = glCreateProgram();
+    glAttachShader(program, vert);
+    glAttachShader(program, frag);
+    for (i = 0; i < 4; i++) {
+        if (locations[i] >= 0) {
+            glBindAttribLocation(program, locations[i], attributes[i]);
+        }
+    }
+    glLinkProgram(program);
+    glDeleteShader(vert);
+    glDeleteShader(frag);
+    status = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &status);
+    if (status != GL_TRUE) {
+        char log[1024];
+        GLsizei length = 0;
+        glGetProgramInfoLog(program, sizeof(log), &length, log);
+        BR_WARNING2("VIDEO: Error linking %s:\n%s", name, log);
+        glDeleteProgram(program);
+        return 0;
+    }
+    /* (a variant may have dropped a block it doesn't use) */
+    block = glGetUniformBlockIndex(program, "br_scene_state");
+    if (block != GL_INVALID_INDEX) {
+        glUniformBlockBinding(program, block, hVideo->brenderProgram.blockBindingScene);
+    }
+    block = glGetUniformBlockIndex(program, "br_model_state");
+    if (block != GL_INVALID_INDEX) {
+        glUniformBlockBinding(program, block, hVideo->brenderProgram.blockBindingModel);
+    }
+    get_uniforms(program, u);
+    GL_CHECK_ERROR();
+    return program;
+}
+
 static void VIDEOI_GetShaderVariables(HVIDEO hVideo) {
     glGenBuffers(1, &hVideo->brenderProgram.uboScene);
     glBindBuffer(GL_UNIFORM_BUFFER, hVideo->brenderProgram.uboScene);
@@ -23,24 +102,7 @@ static void VIDEOI_GetShaderVariables(HVIDEO hVideo) {
     hVideo->brenderProgram.attributes.aUV = glGetAttribLocation(hVideo->brenderProgram.program, "aUV");
     hVideo->brenderProgram.attributes.aNormal = glGetAttribLocation(hVideo->brenderProgram.program, "aNormal");
     hVideo->brenderProgram.attributes.aColour = glGetAttribLocation(hVideo->brenderProgram.program, "aColour");
-    hVideo->brenderProgram.uniforms.main_texture = glGetUniformLocation(hVideo->brenderProgram.program, "main_texture");
-    hVideo->brenderProgram.uniforms.sharp_filter = glGetUniformLocation(hVideo->brenderProgram.program, "sharp_filter");
-    hVideo->brenderProgram.uniforms.alpha_to_coverage = glGetUniformLocation(hVideo->brenderProgram.program, "alpha_to_coverage");
-    hVideo->brenderProgram.uniforms.fog_distance = glGetUniformLocation(hVideo->brenderProgram.program, "fog_distance");
-    hVideo->brenderProgram.uniforms.glow_texture = glGetUniformLocation(hVideo->brenderProgram.program, "glow_texture");
-    hVideo->brenderProgram.uniforms.glow_intensity = glGetUniformLocation(hVideo->brenderProgram.program, "glow_intensity");
-    hVideo->brenderProgram.uniforms.surface_reflect = glGetUniformLocation(hVideo->brenderProgram.program, "surface_reflect");
-    hVideo->brenderProgram.uniforms.soft_depth = glGetUniformLocation(hVideo->brenderProgram.program, "soft_depth");
-    hVideo->brenderProgram.uniforms.soft_distance = glGetUniformLocation(hVideo->brenderProgram.program, "soft_distance");
-    hVideo->brenderProgram.uniforms.surface_wear = glGetUniformLocation(hVideo->brenderProgram.program, "surface_wear");
-    hVideo->brenderProgram.uniforms.surface_sprite = glGetUniformLocation(hVideo->brenderProgram.program, "surface_sprite");
-    hVideo->brenderProgram.uniforms.surface_soft = glGetUniformLocation(hVideo->brenderProgram.program, "surface_soft");
-    hVideo->brenderProgram.uniforms.scene_brightness = glGetUniformLocation(hVideo->brenderProgram.program, "scene_brightness");
-    hVideo->brenderProgram.uniforms.num_spots = glGetUniformLocation(hVideo->brenderProgram.program, "num_spots");
-    hVideo->brenderProgram.uniforms.spots = glGetUniformLocation(hVideo->brenderProgram.program, "spots");
-    hVideo->brenderProgram.uniforms.surface_sun = glGetUniformLocation(hVideo->brenderProgram.program, "surface_sun");
-    hVideo->brenderProgram.uniforms.surface_up = glGetUniformLocation(hVideo->brenderProgram.program, "surface_up");
-    hVideo->brenderProgram.uniforms.surface_haze = glGetUniformLocation(hVideo->brenderProgram.program, "surface_haze");
+    get_uniforms(hVideo->brenderProgram.program, &hVideo->brenderProgram.uniforms);
     GL_CHECK_ERROR();
 }
 
@@ -114,6 +176,14 @@ br_boolean VIDEOI_CompileBRenderShader(HVIDEO hVideo, const char* vertPath, cons
         }
 
         VIDEOI_GetShaderVariables(hVideo);
+        hVideo->uniforms = &hVideo->brenderProgram.uniforms;
+
+        /* (without it the shadow maps are drawn with the full program, which writes the same depth) */
+        hVideo->shadowProgram.program = compile_variant(hVideo, "brender (shadow pass)", "#define SHADOW_PASS\n",
+            &hVideo->shadowProgram.uniforms);
+        if (hVideo->shadowProgram.program == 0) {
+            BR_WARNING0("VIDEO: no shadow pass program, the shadow maps are drawn with the full one");
+        }
     }
 
     GL_CHECK_ERROR();

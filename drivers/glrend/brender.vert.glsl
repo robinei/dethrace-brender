@@ -312,6 +312,7 @@ void main()
     normal = vec4(normalize(mat3(normal_matrix) * aNormal), 0);
     uv = aUV;
 
+#ifndef SHADOW_PASS
     if (lighting == 1u) {
         if (prelit == 1u) {
             colour = vec4(aColour.rgb, 1);
@@ -320,12 +321,13 @@ void main()
         }
     }
 
-    rawPosition = aPosition;
-    rawNormal   = aNormal;
-
     if (!directLightExists && num_lights > 0u && lighting == 1u) {
         colour += vec4(clear_colour.rgb, 0.0);
     }
+#endif
+
+    rawPosition = aPosition;
+    rawNormal   = aNormal;
 
 #if ENABLE_PSX_SIMULATION
     pos = PSXify_pos(mvp * pos, vec2(200.0, 150.0));

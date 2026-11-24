@@ -336,13 +336,13 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
                 glActiveTexture(GL_TEXTURE1);
                 glBindTexture(GL_TEXTURE_2D, state->prim.colour_map->glow_tex);
                 glActiveTexture(GL_TEXTURE0);
-                glUniform1f(hVideo->brenderProgram.uniforms.glow_intensity, state->prim.colour_map->glow_intensity
+                glUniform1f(hVideo->uniforms->glow_intensity, state->prim.colour_map->glow_intensity
                         * (hVideo->glowScale != NULL ? hVideo->glowScale(state->prim.colour_map->glow_id) : 1.0f));
             } else {
-                glUniform1f(hVideo->brenderProgram.uniforms.glow_intensity, 0.0f);
+                glUniform1f(hVideo->uniforms->glow_intensity, 0.0f);
             }
 
-            // glUniform1i(hVideo->brenderProgram.uniforms.main_texture, hVideo->brenderProgram.mainTextureBinding);
+            // glUniform1i(hVideo->uniforms->main_texture, hVideo->brenderProgram.mainTextureBinding);
             model->disable_texture = 0;
 
         } else {
@@ -350,11 +350,11 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
             // todo?
             model->disable_colour_key = 0;
             glBindTexture(GL_TEXTURE_2D, tex_default);
-            glUniform1f(hVideo->brenderProgram.uniforms.glow_intensity, 0.0f);
+            glUniform1f(hVideo->uniforms->glow_intensity, 0.0f);
             model->disable_texture = 1;
             // BrVector4Set(&model->surface_colour, 0, 1, 0, 1);
             // glBindTexture(GL_TEXTURE_2D, 27);
-            // glUniform1i(hVideo->brenderProgram.uniforms.main_texture, hVideo->brenderProgram.mainTextureBinding);
+            // glUniform1i(hVideo->uniforms->main_texture, hVideo->brenderProgram.mainTextureBinding);
         }
 
         GLenum minFilter, magFilter;
@@ -368,7 +368,7 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
         if (sharp) {
             filter = BRT_LINEAR;
         }
-        glUniform1i(hVideo->brenderProgram.uniforms.sharp_filter, sharp);
+        glUniform1i(hVideo->uniforms->sharp_filter, sharp);
         /*
          * Materials request mipmapping through BR_MATF_MAP_ANTIALIASING (mip_map), while
          * BR_MATF_MIP_INTERPOLATION (mip_filter) asks for blending between levels. Treat
@@ -403,19 +403,19 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
          * unless they are themselves mirroring (translucent water), when they write it outright
          */
         keep_alpha = hVideo->post.active && hVideo->post.glowTex != 0 && !(blending_on && reflect > 0.0f);
-        glUniform1f(hVideo->brenderProgram.uniforms.surface_reflect, blending_on && reflect <= 0.0f ? -1.0f : reflect);
-        glUniform1i(hVideo->brenderProgram.uniforms.surface_sprite, hVideo->post.drawSprite != 0);
+        glUniform1f(hVideo->uniforms->surface_reflect, blending_on && reflect <= 0.0f ? -1.0f : reflect);
+        glUniform1i(hVideo->uniforms->surface_sprite, hVideo->post.drawSprite != 0);
         /* (texture_reflect -0.5: a soft edged texture, see brender.frag.glsl) */
-        glUniform1i(hVideo->brenderProgram.uniforms.surface_soft, reflect < -0.45f && reflect > -0.55f);
-        glUniform1f(hVideo->brenderProgram.uniforms.surface_wear,
+        glUniform1i(hVideo->uniforms->surface_soft, reflect < -0.45f && reflect > -0.55f);
+        glUniform1f(hVideo->uniforms->surface_wear,
                     wear_slot >= 0 && hVideo->slotWear != NULL ? hVideo->slotWear(wear_slot) : 0.0f);
         if (hVideo->post.active && hVideo->post.depthSnapshot && hVideo->post.drawSoftDistance > 0.0f) {
             glActiveTexture(GL_TEXTURE2);
             glBindTexture(GL_TEXTURE_2D, hVideo->post.aoDepthTex);
             glActiveTexture(GL_TEXTURE0);
-            glUniform1f(hVideo->brenderProgram.uniforms.soft_distance, hVideo->post.drawSoftDistance);
+            glUniform1f(hVideo->uniforms->soft_distance, hVideo->post.drawSoftDistance);
         } else {
-            glUniform1f(hVideo->brenderProgram.uniforms.soft_distance, 0.0f);
+            glUniform1f(hVideo->uniforms->soft_distance, 0.0f);
         }
         if (hVideo->sceneSurface != NULL) {
             /* it can change within a scene (off for the sky) */
@@ -424,13 +424,13 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
                 surface[3] = surface[7] = surface[11] = surface[13] = 0.0f;
             }
             if (memcmp(surface, hVideo->sceneSurfaceUploaded, sizeof(surface)) != 0) {
-                glUniform4fv(hVideo->brenderProgram.uniforms.surface_sun, 1, &surface[0]);
-                glUniform4fv(hVideo->brenderProgram.uniforms.surface_up, 1, &surface[4]);
-                glUniform4fv(hVideo->brenderProgram.uniforms.surface_haze, 2, &surface[8]);
+                glUniform4fv(hVideo->uniforms->surface_sun, 1, &surface[0]);
+                glUniform4fv(hVideo->uniforms->surface_up, 1, &surface[4]);
+                glUniform4fv(hVideo->uniforms->surface_haze, 2, &surface[8]);
                 memcpy(hVideo->sceneSurfaceUploaded, surface, sizeof(surface));
             }
         }
-        glUniform1i(hVideo->brenderProgram.uniforms.alpha_to_coverage, hVideo->sampleBuffers != 0);
+        glUniform1i(hVideo->uniforms->alpha_to_coverage, hVideo->sampleBuffers != 0);
         if (blending_on) {
             glEnable(GL_BLEND);
             model->alpha = state->prim.alpha_val / 255.0f;
@@ -481,7 +481,7 @@ void StoredGLRenderGroup(br_geometry_stored* self, br_renderer* renderer, const 
         /* Program */
         GLint p;
         glGetIntegerv(GL_CURRENT_PROGRAM, &p);
-        ASSERT(p == hVideo->brenderProgram.program);
+        ASSERT(p == hVideo->brenderProgram.program || p == hVideo->shadowProgram.program);
 
         /* FBO */
         glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &p);

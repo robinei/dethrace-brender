@@ -11,6 +11,28 @@ extern "C" {
 
 #define BR_STATIC_ASSERT(cond, msg) _Static_assert((cond), msg)
 
+/* The uniforms of brender.frag/vert: their locations in a program (-1 where it has none) */
+typedef struct brender_uniforms {
+    GLint main_texture;      /* sampler2D */
+    GLint alpha_to_coverage; /* bool */
+    GLint sharp_filter;      /* bool */
+    GLint fog_distance;      /* bool */
+    GLint glow_texture;      /* sampler2D */
+    GLint glow_intensity;    /* float */
+    GLint surface_reflect;   /* float */
+    GLint soft_depth;        /* sampler2D */
+    GLint soft_distance;     /* float */
+    GLint surface_wear;      /* float */
+    GLint surface_sprite;    /* bool */
+    GLint surface_soft;      /* bool */
+    GLint scene_brightness;  /* float */
+    GLint num_spots;         /* int */
+    GLint spots;             /* vec4[3 * MAX] */
+    GLint surface_sun;       /* vec4 */
+    GLint surface_up;        /* vec4 */
+    GLint surface_haze;      /* vec4[2] */
+} brender_uniforms;
+
 typedef struct _VIDEO {
     GLint maxUniformBlockSize;
     GLint maxUniformBufferBindings;
@@ -58,26 +80,7 @@ typedef struct _VIDEO {
             GLint aColour;   /* Vertex colour, vec4 */
         } attributes;
 
-        struct {
-            GLint main_texture; /* sampler2D */
-            GLint alpha_to_coverage; /* bool */
-            GLint sharp_filter;      /* bool */
-            GLint fog_distance;      /* bool */
-            GLint glow_texture;      /* sampler2D */
-            GLint glow_intensity;    /* float */
-            GLint surface_reflect;   /* float */
-            GLint soft_depth;        /* sampler2D */
-            GLint soft_distance;     /* float */
-            GLint surface_wear;      /* float */
-            GLint surface_sprite;    /* bool */
-            GLint surface_soft;      /* bool */
-            GLint scene_brightness;  /* float */
-            GLint num_spots;         /* int */
-            GLint spots;             /* vec4[3 * MAX] */
-            GLint surface_sun;       /* vec4 */
-            GLint surface_up;        /* vec4 */
-            GLint surface_haze;      /* vec4[2] */
-        } uniforms;
+        brender_uniforms uniforms;
 
         GLuint uboScene;
         GLuint blockIndexScene;
@@ -89,6 +92,16 @@ typedef struct _VIDEO {
 
         GLint mainTextureBinding;
     } brenderProgram;
+
+    /* brender.vert/frag built for the sun's shadow maps (SHADOW_PASS): only what decides the depth (the position
+     * and the colour key's cut-outs), drawn while shadow.active */
+    struct {
+        GLuint program;
+        brender_uniforms uniforms;
+    } shadowProgram;
+
+    /* the uniforms of the program the scene is being drawn with (brenderProgram's or shadowProgram's) */
+    const brender_uniforms* uniforms;
 
     GLint sampleBuffers; /* Non-zero if the default framebuffer is multisampled */
 
