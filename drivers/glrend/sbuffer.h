@@ -70,6 +70,8 @@ typedef struct br_buffer_stored {
     br_boolean reflect_checked;
     int wear_slot; /* see texture_slot, -1 for none */
 
+    br_boolean opaque; /* has no colour key (black) texels, so nothing is cut out of it (FALSE until known) */
+
     br_boolean paletted_source_dirty;
     br_uint_32 palette_revision;
     struct br_device_clut *palette_pointer;

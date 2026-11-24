@@ -97,14 +97,10 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
     StateGLReset(&self->state.cache);
     StateGLUpdateScene(&self->state.cache, self->state.current);
 
-    /* the sun's shadow maps only need the depth: drawn with the program that only works that out */
-    if (hVideo->shadow.active && hVideo->shadowProgram.program != 0) {
-        glUseProgram(hVideo->shadowProgram.program);
-        hVideo->uniforms = &hVideo->shadowProgram.uniforms;
-    } else {
-        glUseProgram(hVideo->brenderProgram.program);
-        hVideo->uniforms = &hVideo->brenderProgram.uniforms;
-    }
+    /* (something else may have been drawn with another program since) */
+    hVideo->variant = NULL;
+    VIDEOI_UseBRenderVariant(hVideo, BRENDER_FULL);
+    hVideo->sceneClipPlanes = self->state.cache.scene.num_clip_planes > 0;
     glBindBufferBase(GL_UNIFORM_BUFFER, hVideo->brenderProgram.blockBindingScene, hVideo->brenderProgram.uboScene);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(self->state.cache.scene), &self->state.cache.scene);
 
@@ -129,33 +125,44 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
 
     /* Bind the model UBO here, it's faster than doing it for each model group */
     glBindBufferBase(GL_UNIFORM_BUFFER, hVideo->brenderProgram.blockBindingModel, hVideo->brenderProgram.uboModel);
-    glUniform1i(hVideo->uniforms->main_texture, hVideo->brenderProgram.mainTextureBinding);
-    glUniform1i(hVideo->uniforms->glow_texture, 1);
-    glUniform1i(hVideo->uniforms->soft_depth, 2);
     {
+        /* the scene's uniforms, for each program it may be drawn with (the shadow maps': that one) */
         float brightness = 1.0f;
         const float* lights = NULL;
         int count = hVideo->sceneLighting != NULL ? hVideo->sceneLighting(&brightness, &lights) : 0;
+        float surface[BR_GL_SCENE_SURFACE_FLOATS] = { 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
+        static const int scene_variants[] = { BRENDER_OPAQUE, BRENDER_FULL };
+        static const int shadow_variants[] = { BRENDER_SHADOW };
+        const int* which = hVideo->shadow.active ? shadow_variants : scene_variants;
+        int n = hVideo->shadow.active ? 1 : 2;
+
         if (count > BR_GL_MAX_SCENE_LIGHTS) {
             count = BR_GL_MAX_SCENE_LIGHTS;
         }
-        glUniform1f(hVideo->uniforms->scene_brightness, brightness);
-        glUniform1i(hVideo->uniforms->num_spots, lights != NULL ? count : 0);
-        if (lights != NULL && count > 0) {
-            glUniform4fv(hVideo->uniforms->spots, 3 * count, lights);
-        }
-    }
-    {
-        float surface[BR_GL_SCENE_SURFACE_FLOATS] = { 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
         if (hVideo->sceneSurface == NULL || !hVideo->sceneSurface(surface)) {
             surface[3] = surface[7] = surface[11] = surface[13] = 0.0f;
         }
-        glUniform4fv(hVideo->uniforms->surface_sun, 1, &surface[0]);
-        glUniform4fv(hVideo->uniforms->surface_up, 1, &surface[4]);
-        glUniform4fv(hVideo->uniforms->surface_haze, 2, &surface[8]);
-        memcpy(hVideo->sceneSurfaceUploaded, surface, sizeof(surface));
+        for (int i = 0; i < n; i++) {
+            const brender_uniforms* u;
+            VIDEOI_UseBRenderVariant(hVideo, which[i]);
+            u = &hVideo->variant->uniforms;
+            glUniform1i(u->main_texture, hVideo->brenderProgram.mainTextureBinding);
+            glUniform1i(u->glow_texture, 1);
+            glUniform1i(u->soft_depth, 2);
+            glUniform1f(u->scene_brightness, brightness);
+            glUniform1i(u->num_spots, lights != NULL ? count : 0);
+            if (lights != NULL && count > 0) {
+                glUniform4fv(u->spots, 3 * count, lights);
+            }
+            glUniform4fv(u->surface_sun, 1, &surface[0]);
+            glUniform4fv(u->surface_up, 1, &surface[4]);
+            glUniform4fv(u->surface_haze, 2, &surface[8]);
+            memcpy(hVideo->variant->surfaceUploaded, surface, sizeof(surface));
+            glUniform1f(u->glow_intensity, 0.0f);
+            glUniform1i(u->alpha_to_coverage, hVideo->sampleBuffers != 0);
+            glUniform1i(u->fog_distance, hVideo->fogDistance != 0);
+        }
     }
-    glUniform1f(hVideo->uniforms->glow_intensity, 0.0f);
     if (hVideo->post.active) {
         /* light sources go to the glow attachment, for the post-processed bloom; the surfaces' normals to the
          * third, for the post-processing */
@@ -163,8 +170,6 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
         static const GLenum no_glow[] = { GL_COLOR_ATTACHMENT0, GL_NONE, GL_COLOR_ATTACHMENT2 };
         glDrawBuffers(3, hVideo->post.glowTex != 0 ? all : no_glow);
     }
-    glUniform1i(hVideo->uniforms->alpha_to_coverage, hVideo->sampleBuffers != 0);
-    glUniform1i(hVideo->uniforms->fog_distance, hVideo->fogDistance != 0);
 
     if (self->pixelmap->msaa_samples)
         glEnable(GL_MULTISAMPLE);

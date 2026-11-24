@@ -102,8 +102,20 @@ static void VIDEOI_GetShaderVariables(HVIDEO hVideo) {
     hVideo->brenderProgram.attributes.aUV = glGetAttribLocation(hVideo->brenderProgram.program, "aUV");
     hVideo->brenderProgram.attributes.aNormal = glGetAttribLocation(hVideo->brenderProgram.program, "aNormal");
     hVideo->brenderProgram.attributes.aColour = glGetAttribLocation(hVideo->brenderProgram.program, "aColour");
-    get_uniforms(hVideo->brenderProgram.program, &hVideo->brenderProgram.uniforms);
+    hVideo->variants[BRENDER_FULL].program = hVideo->brenderProgram.program;
+    get_uniforms(hVideo->brenderProgram.program, &hVideo->variants[BRENDER_FULL].uniforms);
     GL_CHECK_ERROR();
+}
+
+/* Draws with brender.vert/frag as built for `which` (BRENDER_*, or BRENDER_FULL if that didn't build) */
+void VIDEOI_UseBRenderVariant(HVIDEO hVideo, int which) {
+    if (hVideo->variants[which].program == 0) {
+        which = BRENDER_FULL;
+    }
+    if (hVideo->variant != &hVideo->variants[which]) {
+        hVideo->variant = &hVideo->variants[which];
+        glUseProgram(hVideo->variant->program);
+    }
 }
 
 br_boolean VIDEOI_CompileBRenderShader(HVIDEO hVideo, const char* vertPath, const char* fragPath) {
@@ -176,12 +188,17 @@ br_boolean VIDEOI_CompileBRenderShader(HVIDEO hVideo, const char* vertPath, cons
         }
 
         VIDEOI_GetShaderVariables(hVideo);
-        hVideo->uniforms = &hVideo->brenderProgram.uniforms;
+        hVideo->variant = &hVideo->variants[BRENDER_FULL];
 
-        /* (without it the shadow maps are drawn with the full program, which writes the same depth) */
-        hVideo->shadowProgram.program = compile_variant(hVideo, "brender (shadow pass)", "#define SHADOW_PASS\n",
-            &hVideo->shadowProgram.uniforms);
-        if (hVideo->shadowProgram.program == 0) {
+        /* (without them the full program draws it all, the same) */
+        hVideo->variants[BRENDER_OPAQUE].program = compile_variant(hVideo, "brender (opaque)", "#define OPAQUE\n",
+            &hVideo->variants[BRENDER_OPAQUE].uniforms);
+        if (hVideo->variants[BRENDER_OPAQUE].program == 0) {
+            BR_WARNING0("VIDEO: no opaque program, everything is drawn with the full one");
+        }
+        hVideo->variants[BRENDER_SHADOW].program = compile_variant(hVideo, "brender (shadow pass)", "#define SHADOW_PASS\n",
+            &hVideo->variants[BRENDER_SHADOW].uniforms);
+        if (hVideo->variants[BRENDER_SHADOW].program == 0) {
             BR_WARNING0("VIDEO: no shadow pass program, the shadow maps are drawn with the full one");
         }
     }

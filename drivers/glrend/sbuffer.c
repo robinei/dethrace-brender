@@ -196,6 +196,17 @@ static br_error updateMemory(br_buffer_stored* self, br_pixelmap* pm) {
         self->palette_pointer = ObjectDevice(self)->clut;
     } else if (pm->type == BR_PMT_RGB_565) {
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, pm->width, pm->height, format, type, pm->pixels);
+        /* (black is the colour key, see brender.frag.glsl) */
+        self->opaque = BR_TRUE;
+        for (int y = 0; y < pm->height && self->opaque; y++) {
+            const br_uint_16* row = (const br_uint_16*)((const br_uint_8*)pm->pixels + y * pm->row_bytes);
+            for (int x = 0; x < pm->width; x++) {
+                if (row[x] == 0) {
+                    self->opaque = BR_FALSE;
+                    break;
+                }
+            }
+        }
     } else {
         return BRE_FAIL;
     }

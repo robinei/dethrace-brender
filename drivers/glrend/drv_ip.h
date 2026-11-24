@@ -32,6 +32,8 @@ br_boolean VIDEOI_CompileDefaultShader(HVIDEO hVideo);
 
 br_boolean VIDEOI_CompileBRenderShader(HVIDEO hVideo, const char* vertPath, const char* fragPath);
 
+void VIDEOI_UseBRenderVariant(HVIDEO hVideo, int which);
+
 GLuint VIDEO_BrPixelmapToGLTexture(br_pixelmap* pm);
 
 br_error VIDEOI_BrPixelmapToExistingTexture(GLuint tex, br_pixelmap* pm);

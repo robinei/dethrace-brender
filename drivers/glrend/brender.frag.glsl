@@ -486,7 +486,9 @@ void main() {
     vec4 textureColour;
     float coverage = 1.0;
 
+#ifndef OPAQUE
     processClipPlanes();
+#endif
 
     vec2 mappedUV = SurfaceMap(rawPosition, rawNormal, uv);
     // where the relief reads the texture: with the sharp filter, snapped like the colour, so it is flat within
@@ -511,6 +513,9 @@ void main() {
         } else {
             textureColour = texture(main_texture, mappedUV);
         }
+#ifndef OPAQUE
+        // (OPAQUE: drawn with what has nothing to cut out, and no clip planes, see apply_stored_properties: no
+        // discard anywhere, so the depth is tested before shading)
         if (surface_soft) {
             // the cut out shape, blurred (two mip levels coarser), un-premultiplied, and faded towards the quad's
             // rim, so no hard border shows
@@ -543,6 +548,7 @@ void main() {
             }
             textureColour.rgb /= textureColour.a;
         }
+#endif
     }
 
 #ifdef SHADOW_PASS

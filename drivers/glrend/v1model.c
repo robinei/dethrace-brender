@@ -179,7 +179,9 @@ static void update_glow_texture(HVIDEO hVideo, br_buffer_stored* buffer) {
     GL_CHECK_ERROR();
 }
 
-static void update_paletted_texture(HVIDEO hVideo, br_pixelmap *src, br_uint_32 *palette) {
+/* returns whether it is opaque: no colour key (black) texels */
+static br_boolean update_paletted_texture(HVIDEO hVideo, br_pixelmap *src, br_uint_32 *palette) {
+    br_boolean opaque = BR_TRUE;
     int width = src->width, height = src->height;
     uint32_t* buffer = BrScratchAllocate(sizeof(uint32_t) * width * height);
     uint32_t* buffer_ptr = buffer;
@@ -192,6 +194,7 @@ static void update_paletted_texture(HVIDEO hVideo, br_pixelmap *src, br_uint_32 
             // Black is the colour key. Store it as zero alpha too, so mipmap levels carry
             // coverage and the texture is effectively premultiplied (see brender.frag.glsl).
             *buffer_ptr = rgb == 0 ? 0 : (0xff000000 | rgb);
+            opaque = opaque && rgb != 0;
             buffer_ptr++;
         }
     }
@@ -213,6 +216,7 @@ static void update_paletted_texture(HVIDEO hVideo, br_pixelmap *src, br_uint_32 
     glGenerateMipmap(GL_TEXTURE_2D);
     BrScratchFree(buffer);
     GL_CHECK_ERROR();
+    return opaque;
 }
 
 static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t states, shader_data_model* model, GLuint tex_default) {
@@ -296,6 +300,20 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
     }
 
     if (states & MASK_STATE_PRIMITIVE) {
+        /*
+         * The program: what can't have anything cut out (no colour key texels, not blended or soft edged, no clip
+         * planes) is drawn with the one that has no discard, which lets the GPU test the depth before shading; the
+         * rest with the full one. (The sun's shadow maps: theirs, see sceneBegin. Until a texture has been looked
+         * at, the full one.)
+         */
+        if (!hVideo->shadow.active) {
+            br_buffer_stored* map = state->prim.colour_map;
+            br_boolean blended = (state->prim.flags & PRIMF_BLEND) || (map != NULL && map->blended);
+            br_boolean cut = map != NULL
+                && ((!map->reflect_checked || (map->reflect < -0.45f && map->reflect > -0.55f))
+                    || ((state->prim.flags & PRIMF_COLOUR_KEY) && !map->opaque));
+            VIDEOI_UseBRenderVariant(hVideo, blended || cut || hVideo->sceneClipPlanes ? BRENDER_FULL : BRENDER_OPAQUE);
+        }
 
         if (state->prim.flags & PRIMF_COLOUR_WRITE)
             glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -309,13 +327,13 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
 
             // has the 8 bit color source changed?
             if (state->prim.colour_map->paletted_source_dirty == BR_TRUE) {
-                update_paletted_texture(hVideo, state->prim.colour_map->source, state->prim.colour_map->palette_pointer->entries);
+                state->prim.colour_map->opaque = update_paletted_texture(hVideo, state->prim.colour_map->source, state->prim.colour_map->palette_pointer->entries);
                 state->prim.colour_map->paletted_source_dirty = BR_FALSE;
                 state->prim.colour_map->palette_revision = state->prim.colour_map->palette_pointer->revision;
             }
             // or has the palette changed?
             else if (state->prim.colour_map->palette_pointer != NULL && state->prim.colour_map->palette_revision != state->prim.colour_map->palette_pointer->revision) {
-                update_paletted_texture(hVideo, state->prim.colour_map->source, state->prim.colour_map->palette_pointer->entries);
+                state->prim.colour_map->opaque = update_paletted_texture(hVideo, state->prim.colour_map->source, state->prim.colour_map->palette_pointer->entries);
                 state->prim.colour_map->palette_revision = state->prim.colour_map->palette_pointer->revision;
             }
 
@@ -336,13 +354,13 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
                 glActiveTexture(GL_TEXTURE1);
                 glBindTexture(GL_TEXTURE_2D, state->prim.colour_map->glow_tex);
                 glActiveTexture(GL_TEXTURE0);
-                glUniform1f(hVideo->uniforms->glow_intensity, state->prim.colour_map->glow_intensity
+                glUniform1f(hVideo->variant->uniforms.glow_intensity, state->prim.colour_map->glow_intensity
                         * (hVideo->glowScale != NULL ? hVideo->glowScale(state->prim.colour_map->glow_id) : 1.0f));
             } else {
-                glUniform1f(hVideo->uniforms->glow_intensity, 0.0f);
+                glUniform1f(hVideo->variant->uniforms.glow_intensity, 0.0f);
             }
 
-            // glUniform1i(hVideo->uniforms->main_texture, hVideo->brenderProgram.mainTextureBinding);
+            // glUniform1i(hVideo->variant->uniforms.main_texture, hVideo->brenderProgram.mainTextureBinding);
             model->disable_texture = 0;
 
         } else {
@@ -350,11 +368,11 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
             // todo?
             model->disable_colour_key = 0;
             glBindTexture(GL_TEXTURE_2D, tex_default);
-            glUniform1f(hVideo->uniforms->glow_intensity, 0.0f);
+            glUniform1f(hVideo->variant->uniforms.glow_intensity, 0.0f);
             model->disable_texture = 1;
             // BrVector4Set(&model->surface_colour, 0, 1, 0, 1);
             // glBindTexture(GL_TEXTURE_2D, 27);
-            // glUniform1i(hVideo->uniforms->main_texture, hVideo->brenderProgram.mainTextureBinding);
+            // glUniform1i(hVideo->variant->uniforms.main_texture, hVideo->brenderProgram.mainTextureBinding);
         }
 
         GLenum minFilter, magFilter;
@@ -368,7 +386,7 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
         if (sharp) {
             filter = BRT_LINEAR;
         }
-        glUniform1i(hVideo->uniforms->sharp_filter, sharp);
+        glUniform1i(hVideo->variant->uniforms.sharp_filter, sharp);
         /*
          * Materials request mipmapping through BR_MATF_MAP_ANTIALIASING (mip_map), while
          * BR_MATF_MIP_INTERPOLATION (mip_filter) asks for blending between levels. Treat
@@ -403,19 +421,19 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
          * unless they are themselves mirroring (translucent water), when they write it outright
          */
         keep_alpha = hVideo->post.active && hVideo->post.glowTex != 0 && !(blending_on && reflect > 0.0f);
-        glUniform1f(hVideo->uniforms->surface_reflect, blending_on && reflect <= 0.0f ? -1.0f : reflect);
-        glUniform1i(hVideo->uniforms->surface_sprite, hVideo->post.drawSprite != 0);
+        glUniform1f(hVideo->variant->uniforms.surface_reflect, blending_on && reflect <= 0.0f ? -1.0f : reflect);
+        glUniform1i(hVideo->variant->uniforms.surface_sprite, hVideo->post.drawSprite != 0);
         /* (texture_reflect -0.5: a soft edged texture, see brender.frag.glsl) */
-        glUniform1i(hVideo->uniforms->surface_soft, reflect < -0.45f && reflect > -0.55f);
-        glUniform1f(hVideo->uniforms->surface_wear,
+        glUniform1i(hVideo->variant->uniforms.surface_soft, reflect < -0.45f && reflect > -0.55f);
+        glUniform1f(hVideo->variant->uniforms.surface_wear,
                     wear_slot >= 0 && hVideo->slotWear != NULL ? hVideo->slotWear(wear_slot) : 0.0f);
         if (hVideo->post.active && hVideo->post.depthSnapshot && hVideo->post.drawSoftDistance > 0.0f) {
             glActiveTexture(GL_TEXTURE2);
             glBindTexture(GL_TEXTURE_2D, hVideo->post.aoDepthTex);
             glActiveTexture(GL_TEXTURE0);
-            glUniform1f(hVideo->uniforms->soft_distance, hVideo->post.drawSoftDistance);
+            glUniform1f(hVideo->variant->uniforms.soft_distance, hVideo->post.drawSoftDistance);
         } else {
-            glUniform1f(hVideo->uniforms->soft_distance, 0.0f);
+            glUniform1f(hVideo->variant->uniforms.soft_distance, 0.0f);
         }
         if (hVideo->sceneSurface != NULL) {
             /* it can change within a scene (off for the sky) */
@@ -423,14 +441,14 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
             if (!hVideo->sceneSurface(surface)) {
                 surface[3] = surface[7] = surface[11] = surface[13] = 0.0f;
             }
-            if (memcmp(surface, hVideo->sceneSurfaceUploaded, sizeof(surface)) != 0) {
-                glUniform4fv(hVideo->uniforms->surface_sun, 1, &surface[0]);
-                glUniform4fv(hVideo->uniforms->surface_up, 1, &surface[4]);
-                glUniform4fv(hVideo->uniforms->surface_haze, 2, &surface[8]);
-                memcpy(hVideo->sceneSurfaceUploaded, surface, sizeof(surface));
+            if (memcmp(surface, hVideo->variant->surfaceUploaded, sizeof(surface)) != 0) {
+                glUniform4fv(hVideo->variant->uniforms.surface_sun, 1, &surface[0]);
+                glUniform4fv(hVideo->variant->uniforms.surface_up, 1, &surface[4]);
+                glUniform4fv(hVideo->variant->uniforms.surface_haze, 2, &surface[8]);
+                memcpy(hVideo->variant->surfaceUploaded, surface, sizeof(surface));
             }
         }
-        glUniform1i(hVideo->uniforms->alpha_to_coverage, hVideo->sampleBuffers != 0);
+        glUniform1i(hVideo->variant->uniforms.alpha_to_coverage, hVideo->sampleBuffers != 0);
         if (blending_on) {
             glEnable(GL_BLEND);
             model->alpha = state->prim.alpha_val / 255.0f;
@@ -438,10 +456,12 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
             glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
         } else {
             glDisable(GL_BLEND);
-            /* Opaque: output alpha is only used as colour-key coverage (see brender.frag.glsl) */
+            /* Opaque: output alpha is only used as colour-key coverage (see brender.frag.glsl): none without the key */
             model->alpha = 1.0f;
-            if (hVideo->sampleBuffers) {
+            if (hVideo->sampleBuffers && hVideo->variant != &hVideo->variants[BRENDER_OPAQUE]) {
                 glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+            } else {
+                glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
             }
         }
 
@@ -481,7 +501,7 @@ void StoredGLRenderGroup(br_geometry_stored* self, br_renderer* renderer, const 
         /* Program */
         GLint p;
         glGetIntegerv(GL_CURRENT_PROGRAM, &p);
-        ASSERT(p == hVideo->brenderProgram.program || p == hVideo->shadowProgram.program);
+        ASSERT(p == hVideo->variant->program);
 
         /* FBO */
         glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &p);

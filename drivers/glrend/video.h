@@ -33,6 +33,8 @@ typedef struct brender_uniforms {
     GLint surface_haze;      /* vec4[2] */
 } brender_uniforms;
 
+enum { BRENDER_FULL, BRENDER_OPAQUE, BRENDER_SHADOW, BRENDER_VARIANTS };
+
 typedef struct _VIDEO {
     GLint maxUniformBlockSize;
     GLint maxUniformBufferBindings;
@@ -51,7 +53,6 @@ typedef struct _VIDEO {
     br_device_gl_texturereflect_cbfn* textureReflect;
     br_device_gl_textureslot_cbfn* textureSlot;
     br_device_gl_slotwear_cbfn* slotWear;
-    float sceneSurfaceUploaded[BR_GL_SCENE_SURFACE_FLOATS]; /* the scene_surface parameters last given to the shader */
 
     struct {
         GLuint program;
@@ -80,8 +81,6 @@ typedef struct _VIDEO {
             GLint aColour;   /* Vertex colour, vec4 */
         } attributes;
 
-        brender_uniforms uniforms;
-
         GLuint uboScene;
         GLuint blockIndexScene;
         GLuint blockBindingScene;
@@ -93,15 +92,21 @@ typedef struct _VIDEO {
         GLint mainTextureBinding;
     } brenderProgram;
 
-    /* brender.vert/frag built for the sun's shadow maps (SHADOW_PASS): only what decides the depth (the position
-     * and the colour key's cut-outs), drawn while shadow.active */
+    /*
+     * brender.vert/frag as built for what is drawn (see VIDEOI_UseBRenderVariant):
+     * - BRENDER_FULL: brenderProgram's, everything
+     * - BRENDER_OPAQUE: OPAQUE, nothing cut out (no discard), so the GPU can test the depth before shading: for
+     *   what has no colour key's cut-outs, isn't blended or soft, when there are no clip planes
+     * - BRENDER_SHADOW: SHADOW_PASS, only what decides the depth (the position and the colour key's cut-outs), for
+     *   the sun's shadow maps
+     * (0 for one that didn't build: BRENDER_FULL instead)
+     */
     struct {
         GLuint program;
         brender_uniforms uniforms;
-    } shadowProgram;
-
-    /* the uniforms of the program the scene is being drawn with (brenderProgram's or shadowProgram's) */
-    const brender_uniforms* uniforms;
+        float surfaceUploaded[BR_GL_SCENE_SURFACE_FLOATS]; /* the scene_surface parameters last given to it */
+    } variants[BRENDER_VARIANTS], *variant; /* (the one in use) */
+    int sceneClipPlanes; /* the scene being drawn has clip planes (only BRENDER_FULL clips) */
 
     GLint sampleBuffers; /* Non-zero if the default framebuffer is multisampled */
 
