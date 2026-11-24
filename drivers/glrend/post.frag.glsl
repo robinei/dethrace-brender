@@ -13,6 +13,9 @@ uniform sampler2D uColour;
 // 0: all in one; 1: the lit scene only (into a texture, see post.c), 2: the rest, with uColour that lit scene
 // (mipmapped), so the depth of field and the speed blur blur the shadows and reflections with everything else
 uniform int uStage;
+// the sun's shadow from its maps at half resolution (stage 3 draws it), and whether there is (see sunShadow)
+uniform sampler2D uSunHalf;
+uniform bool uSunHalfOn;
 // lamps (street lamps, neon, signs) the air glows around at night: view space position and the reach of the glow,
 // colour and strength
 uniform vec4 uLamps[48];
@@ -618,6 +621,48 @@ float shadowLevels(vec2 p, vec3 P, vec3 n, float facing, float gap, bool sprite)
 // how much the pixel is in shadow, 0..1, as sunShadow found (for the sun's highlights)
 float gInShadow = 0.0;
 
+// What the maps say at window pixel p, 0..1: the search and filter in them (shadowLevels), which costs, for a
+// sprite or a surface facing the sun (else 1)
+float sunMaps(vec2 p) {
+    if (uShadowTexel[0] + uShadowTexel[1] + uShadowTexel[2] <= 0.0 || texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
+        return 0.0;
+    }
+    vec3 P = viewPosition(p);
+    vec3 n = viewNormal(p, P);
+    float facing = dot(n, normalize(uSun.xyz));
+    if (isSprite(p)) {
+        return shadowLevels(p, P, n, facing, 0.15, true);
+    }
+    return facing > -0.02 ? shadowLevels(p, P, n, facing, 0.0, false) : 1.0;
+}
+
+// sunMaps at window pixel p: drawn at half resolution (stage 3: of every other pixel, as the ambient occlusion),
+// taken from there with depth aware weights (and only from what is a sprite as p is or isn't)
+float sunMapsAt(vec2 p) {
+    if (!uSunHalfOn) {
+        return sunMaps(p);
+    }
+    float z = linearDepth(texelFetch(uDepth, ivec2(p), 0).r);
+    bool sprite = isSprite(p);
+    vec2 h = floor(p * 0.5);
+    ivec2 last = textureSize(uSunHalf, 0) - 1;
+    float sum = 0.0;
+    float weight = 0.0;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            ivec2 q = clamp(ivec2(h) + ivec2(x, y), ivec2(0), last);
+            vec2 at = vec2(q) * 2.0 + 1.0;
+            float zq = linearDepth(texelFetch(uDepth, ivec2(at), 0).r);
+            float w = exp(-abs(zq - z) / max(0.02 * z, 0.01)) * (x == 0 && y == 0 ? 2.0 : 1.0);
+            w *= isSprite(at) == sprite ? 1.0 : 0.0;
+            sum += texelFetch(uSunHalf, q, 0).r * w;
+            weight += w;
+        }
+    }
+    // (nothing like it near: as it is)
+    return weight > 0.0001 ? sum / weight : sunMaps(p);
+}
+
 float sunShadow(vec2 p, vec2 size) {
     if (uShadowTexel[0] + uShadowTexel[1] + uShadowTexel[2] <= 0.0 || texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
         return 1.0;
@@ -629,7 +674,7 @@ float sunShadow(vec2 p, vec2 size) {
     // how bright what is in shadow is, relative to the ground in the sun
     float shade_level = 1.0 - min(0.38 * uSun.w, 0.8);
     if (isSprite(p)) {
-        gInShadow = shadowLevels(p, P, n, facing, 0.15, true);
+        gInShadow = sunMapsAt(p);
         return mix(1.0, shade_level, gInShadow);
     }
     // the sun shading the surface already has (see surfaceShading in brender.frag.glsl), which shadow only adds to
@@ -639,7 +684,7 @@ float sunShadow(vec2 p, vec2 size) {
     float front = smoothstep(-0.02, 0.12, facing);
     float in_shadow = 1.0;
     if (front > 0.0) {
-        in_shadow = mix(1.0, shadowLevels(p, P, n, facing, 0.0, false), front);
+        in_shadow = mix(1.0, sunMapsAt(p), front);
     }
     gInShadow = in_shadow;
     return mix(1.0, target, in_shadow);
@@ -849,6 +894,11 @@ vec3 litScene(vec2 p, vec2 size) {
 void main() {
     vec2 size = vec2(textureSize(uColour, 0));
     vec2 p = gl_FragCoord.xy;
+    if (uStage == 3) {
+        // (every other pixel's, see sunMapsAt)
+        fragColour = vec4(sunMaps(floor(p) * 2.0 + 1.0));
+        return;
+    }
     vec3 c;
     if (uStage == 2) {
         c = dof(p, size);

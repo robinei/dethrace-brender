@@ -34,7 +34,7 @@
 enum {
     U_COLOUR, U_DEPTH, U_GLOW, U_AO, U_VIEW, U_PROJ, U_NEAR, U_FAR, U_TIME, U_SCALE, U_START, U_END, U_MAX_RADIUS,
     U_GLOW_STRENGTH, U_FLARE_STRENGTH, U_AO_STRENGTH, U_SPEED, U_SHIMMER_COUNT, U_SHIMMERS, U_GRADE, U_AO_DEPTH,
-    U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN, U_SHADOW_MAP, U_SHADOW_PROJ, U_SHADOW_VIEW, U_SHADOW_TEXEL, U_SUN_SHADING, U_NORMAL, U_SPECULAR, U_SUN_DIR, U_STAGE, U_LAMPS, U_LAMP_COUNT, U_RAIN,
+    U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN, U_SHADOW_MAP, U_SHADOW_PROJ, U_SHADOW_VIEW, U_SHADOW_TEXEL, U_SUN_SHADING, U_NORMAL, U_SPECULAR, U_SUN_DIR, U_STAGE, U_LAMPS, U_LAMP_COUNT, U_RAIN, U_SUN_HALF, U_SUN_HALF_ON,
     U_COUNT
 };
 /* (they must fit hVideo->post.uniforms) */
@@ -42,7 +42,7 @@ typedef char post_uniforms_fit[U_COUNT <= 64 ? 1 : -1];
 static const char* uniform_names[U_COUNT] = {
     "uColour", "uDepth", "uGlow", "uAO", "uView", "uProj", "uNear", "uFar", "uTime", "uScale", "uStart", "uEnd",
     "uMaxRadius", "uGlowStrength", "uFlareStrength", "uAOStrength", "uSpeed", "uShimmerCount", "uShimmers", "uGrade", "uAODepth",
-    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun", "uShadowMap", "uShadowProj", "uShadowView", "uShadowTexel", "uSunShading", "uNormal", "uSpecular", "uSunDir", "uStage", "uLamps", "uLampCount", "uRain"
+    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun", "uShadowMap", "uShadowProj", "uShadowView", "uShadowTexel", "uSunShading", "uNormal", "uSpecular", "uSunDir", "uStage", "uLamps", "uLampCount", "uRain", "uSunHalf", "uSunHalfOn"
 };
 enum {
     W_TO_WORLD, W_VIEW, W_PROJ, W_SIZE, W_TIME, W_SCALE, W_RAIN, W_BOX, W_DEPTH, W_NEAR, W_FAR, W_BRIGHTNESS, W_AMOUNT,
@@ -78,6 +78,9 @@ static void delete_targets(HVIDEO hVideo) {
     glDeleteFramebuffers(1, &hVideo->post.litFbo);
     glDeleteTextures(1, &hVideo->post.litTex);
     hVideo->post.litFbo = hVideo->post.litTex = 0;
+    glDeleteFramebuffers(1, &hVideo->post.sunFbo);
+    glDeleteTextures(1, &hVideo->post.sunTex);
+    hVideo->post.sunFbo = hVideo->post.sunTex = 0;
     hVideo->post.aoDepthFbo = hVideo->post.aoDepthTex = 0;
     hVideo->post.msaaFbo = hVideo->post.msaaColour = hVideo->post.msaaGlow = hVideo->post.msaaDepth = 0;
     hVideo->post.resolveFbo = hVideo->post.colourTex = hVideo->post.glowTex = hVideo->post.depthTex = 0;
@@ -344,7 +347,7 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     br_device_pixelmap* self = (br_device_pixelmap*)screen;
     HVIDEO hVideo;
     GLboolean sample_shading;
-    int split;
+    int split, sun_half;
     GLint* u;
     GLint* a;
     int w, h, ao;
@@ -513,6 +516,41 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
         }
     }
     /*
+     * The sun's shadow from its maps (the costly part: the search and filter in them) at half resolution, into
+     * sunTex, which the full resolution pass upsamples with depth aware weights (see sunShadow in post.frag.glsl)
+     */
+    sun_half = params->sun[3] > 0.0f && hVideo->post.viewArea > 0
+        && (hVideo->shadow.valid[0] || hVideo->shadow.valid[1] || hVideo->shadow.valid[2]);
+    if (sun_half && hVideo->post.sunTex == 0) {
+        hVideo->post.sunTex = create_texture(GL_R8, (w + 1) / 2, (h + 1) / 2, GL_RED, GL_UNSIGNED_BYTE, GL_NEAREST, 0);
+        glGenFramebuffers(1, &hVideo->post.sunFbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.sunFbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, hVideo->post.sunTex, 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            BR_WARNING0("GLREND: post-processing sun shadow framebuffer incomplete");
+            glDeleteFramebuffers(1, &hVideo->post.sunFbo);
+            glDeleteTextures(1, &hVideo->post.sunTex);
+            hVideo->post.sunFbo = hVideo->post.sunTex = 0;
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+    sun_half = sun_half && hVideo->post.sunTex != 0;
+    glUniform1i(u[U_SUN_HALF], 9);
+    glUniform1i(u[U_SUN_HALF_ON], 0);
+    if (sun_half) {
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.sunFbo);
+        glViewport(0, 0, (w + 1) / 2, (h + 1) / 2);
+        glUniform1i(u[U_STAGE], 3);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, w, h);
+        glActiveTexture(GL_TEXTURE9);
+        glBindTexture(GL_TEXTURE_2D, hVideo->post.sunTex);
+        glActiveTexture(GL_TEXTURE0);
+        glUniform1i(u[U_SUN_HALF_ON], 1);
+    }
+
+    /*
      * With the depth of field or the speed blur, in two: the lit scene (and the weather) into litTex, then the
      * blurs and the rest from it, so what is blurred includes the shadows, reflections and the weather
      */
@@ -553,6 +591,8 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     }
 
     glBindVertexArray(0);
+    glActiveTexture(GL_TEXTURE9);
+    glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE8);
     glBindTexture(GL_TEXTURE_2D, 0);
     for (int level = 2; level >= 0; level--) {
