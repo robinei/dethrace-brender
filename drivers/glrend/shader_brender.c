@@ -10,7 +10,7 @@
 static void get_uniforms(GLuint program, brender_uniforms* u) {
     u->main_texture = glGetUniformLocation(program, "main_texture");
     u->sharp_filter = glGetUniformLocation(program, "sharp_filter");
-    u->alpha_to_coverage = glGetUniformLocation(program, "alpha_to_coverage");
+    u->sample_coverage = glGetUniformLocation(program, "sample_coverage");
     u->fog_distance = glGetUniformLocation(program, "fog_distance");
     u->glow_texture = glGetUniformLocation(program, "glow_texture");
     u->glow_intensity = glGetUniformLocation(program, "glow_intensity");
@@ -144,12 +144,12 @@ static void scene_uniforms(HVIDEO hVideo) {
     glUniform4fv(u->surface_haze, 2, &hVideo->sceneSurfaceValues[8]);
     memcpy(v->surfaceUploaded, hVideo->sceneSurfaceValues, sizeof(v->surfaceUploaded));
     glUniform1f(u->glow_intensity, 0.0f);
-    glUniform1i(u->alpha_to_coverage, hVideo->sceneMultisampled);
+    glUniform1i(u->sample_coverage, 0);
     glUniform1i(u->fog_distance, hVideo->fogDistance != 0);
     /* (the per draw ones: not known) */
     v->glowIntensity = v->reflect = v->wear = v->softDistance = -2.0f;
     v->sharp = v->sprite = v->soft = -1;
-    v->alphaToCoverage = hVideo->sceneMultisampled;
+    v->sampleCoverage = 0;
 }
 
 static void use_variant(HVIDEO hVideo, brender_variant* v) {

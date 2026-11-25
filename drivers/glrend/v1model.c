@@ -533,18 +533,15 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
                 memcpy(hVideo->variant->surfaceUploaded, surface, sizeof(surface));
             }
         }
-        set_uniform1i(hVideo->variant->uniforms.alpha_to_coverage, &hVideo->variant->alphaToCoverage, hVideo->sceneMultisampled);
+        /* (multisampled, not blended: the cut-outs' edges as sample coverage, see brender.frag.glsl) */
+        set_uniform1i(hVideo->variant->uniforms.sample_coverage, &hVideo->variant->sampleCoverage, hVideo->sceneMultisampled && !blending_on);
         if (blending_on) {
             set_cap(GL_BLEND, &hVideo->drawState.blend, 1);
             model->alpha = state->prim.alpha_val / 255.0f;
             apply_blend_mode(hVideo, state, keep_alpha);
-            set_cap(GL_SAMPLE_ALPHA_TO_COVERAGE, &hVideo->drawState.alphaToCoverage, 0);
         } else {
             set_cap(GL_BLEND, &hVideo->drawState.blend, 0);
-            /* Opaque: output alpha is only used as colour-key coverage (see brender.frag.glsl): none without the key */
             model->alpha = 1.0f;
-            set_cap(GL_SAMPLE_ALPHA_TO_COVERAGE, &hVideo->drawState.alphaToCoverage,
-                hVideo->sceneMultisampled && hVideo->variant != &hVideo->variants[BRENDER_OPAQUE]);
         }
 
         model->fog_enabled = state->prim.fog_enabled;

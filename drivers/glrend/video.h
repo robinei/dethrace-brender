@@ -14,7 +14,7 @@ extern "C" {
 /* The uniforms of brender.frag/vert: their locations in a program (-1 where it has none) */
 typedef struct brender_uniforms {
     GLint main_texture;      /* sampler2D */
-    GLint alpha_to_coverage; /* bool */
+    GLint sample_coverage;   /* bool */
     GLint sharp_filter;      /* bool */
     GLint fog_distance;      /* bool */
     GLint glow_texture;      /* sampler2D */
@@ -67,7 +67,7 @@ typedef struct brender_variant {
     int drawSpots[BR_GL_MAX_SCENE_LIGHTS], drawSpotCount; /* the draw_spots last given to it */
     /* the per draw uniforms last given to it (see apply_stored_properties; reset with the scene's uniforms) */
     float glowIntensity, reflect, wear, softDistance;
-    int sharp, sprite, soft, alphaToCoverage;
+    int sharp, sprite, soft, sampleCoverage;
     /* (built for features) BRENDER_FULL or BRENDER_OPAQUE, the features; whether it is in the program list (see
      * VIDEOI_UseBRenderFeatures) */
     int base;
@@ -172,7 +172,7 @@ typedef struct _VIDEO {
      * -1 for not known (sceneBegin resets it, as anything may have changed it in between)
      */
     struct {
-        int colourMask, normalsMask, blend, alphaToCoverage, depthTest, depthMask;
+        int colourMask, normalsMask, blend, depthTest, depthMask;
         GLint depthFunc;
         GLint blendFunc[4];
     } drawState;

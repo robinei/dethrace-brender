@@ -1,5 +1,6 @@
 ##ifdef GL_ES
 #version 300 es
+#extension GL_OES_sample_variables : require
 precision mediump float;
 precision mediump int;
 precision lowp usampler2D;
@@ -7,6 +8,7 @@ precision lowp usampler2D;
 ##ifdef GL_CORE
 #version 140
 #extension GL_ARB_explicit_attrib_location:require
+#extension GL_ARB_sample_shading:require
 ##endif
 
 #define MAX_LIGHTS                   48 /* Must match up with BRender */
@@ -138,7 +140,8 @@ layout (location = 1) out vec4 glowColour;
 layout (location = 2) out vec4 normalColour;
 
 uniform sampler2D main_texture;
-uniform bool alpha_to_coverage;
+// Multisampled, not blended: a cut-out's edge coverage (from its alpha) as the samples it covers (see main)
+uniform bool sample_coverage;
 // Glow mask of the texture (light source texels) and its strength; 0 for none
 uniform sampler2D glow_texture;
 uniform float glow_intensity;
@@ -538,6 +541,7 @@ void main() {
     float coverage = 1.0;
 
 #ifndef OPAQUE
+    gl_SampleMask[0] = -1;
     processClipPlanes();
 #endif
 
@@ -587,13 +591,20 @@ void main() {
             if (textureColour.a <= 0.0 || textureColour.rgb == vec3(0)) {
                 discard;
             }
-            if (alpha_to_coverage) {
-                // Multisampled: turn alpha into sample coverage, sharpened to a ~1 pixel wide
-                // edge so the cut-out stays crisp while thin distant details fade smoothly.
+            if (sample_coverage) {
+                // Multisampled: alpha turned into sample coverage, sharpened to a ~1 pixel wide edge so the
+                // cut-out stays crisp while thin distant details fade smoothly; written as the sample mask, as
+                // alpha to coverage would (that turned off the GPU's early depth test for the whole scene:
+                // Freedreno's LRZ), dithered between neighbouring pixels
                 coverage = clamp((textureColour.a - 0.5) / max(fwidth(textureColour.a), 0.0001) + 0.5, 0.0, 1.0);
-                if (coverage <= 0.0) {
+                int samples = gl_NumSamples;
+                ivec2 q = ivec2(gl_FragCoord.xy) & 1;
+                int covered = clamp(int(coverage * float(samples) + (float(q.x ^ q.y) + 0.5) * 0.5), 0, samples);
+                if (covered == 0) {
                     discard;
                 }
+                int mask = ((1 << covered) - 1) << ((q.x + 2 * q.y) % samples);
+                gl_SampleMask[0] = (mask | (mask >> samples)) & ((1 << samples) - 1);
             } else if (textureColour.a < 0.5) {
                 discard;
             }

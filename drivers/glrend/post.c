@@ -516,7 +516,6 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
     glDisable(GL_CULL_FACE);
-    glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     /* one shader invocation per pixel, not per sample */
     sample_shading = glIsEnabled(GL_SAMPLE_SHADING);
     glDisable(GL_SAMPLE_SHADING);

@@ -186,7 +186,6 @@ void BR_CMETHOD_DECL(br_renderer_gl, sceneEnd)(br_renderer* self) {
     glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
-    glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
 
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
