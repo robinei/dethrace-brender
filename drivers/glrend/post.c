@@ -24,6 +24,7 @@
 #include "post.vert.glsl.h"
 #include "post.frag.glsl.h"
 #include "ssao.frag.glsl.h"
+#include <stdio.h>
 #include "weather.vert.glsl.h"
 #include "weather.frag.glsl.h"
 
@@ -37,7 +38,7 @@ enum {
     U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN, U_SHADOW_MAP, U_SHADOW_PROJ, U_SHADOW_VIEW, U_SHADOW_TEXEL, U_SUN_SHADING, U_NORMAL, U_SPECULAR, U_SUN_DIR, U_STAGE, U_LAMPS, U_LAMP_COUNT, U_RAIN, U_SUN_HALF, U_SUN_HALF_ON, U_WET_HALF, U_WET_HALF_ON, U_DOF_HALF, U_AO_LINEAR,
     U_COUNT
 };
-/* (they must fit hVideo->post.uniforms) */
+/* (they must fit hVideo->post.stageUniforms) */
 typedef char post_uniforms_fit[U_COUNT <= 64 ? 1 : -1];
 static const char* uniform_names[U_COUNT] = {
     "uColour", "uDepth", "uGlow", "uAO", "uView", "uProj", "uNear", "uFar", "uTime", "uScale", "uStart", "uEnd",
@@ -192,12 +193,12 @@ static br_error create_targets(HVIDEO hVideo, int width, int height, int samples
     return BRE_OK;
 }
 
-static GLuint compile_program(const char* name, const char* frag_source, size_t frag_size, const char** names, int count, GLint* locations) {
+static GLuint compile_program(const char* name, const char* frag_source, size_t frag_size, const char** names, int count, GLint* locations, const char* defines) {
     GLuint vert, frag, program;
     int i;
 
     vert = VIDEOI_CreateAndCompileShader("post.vert", GL_VERTEX_SHADER, POST_VERT_GLSL, sizeof(POST_VERT_GLSL));
-    frag = VIDEOI_CreateAndCompileShader(name, GL_FRAGMENT_SHADER, frag_source, frag_size);
+    frag = VIDEOI_CreateAndCompileShaderDefines(name, GL_FRAGMENT_SHADER, frag_source, frag_size, defines);
     if (!vert || !frag) {
         return 0;
     }
@@ -304,9 +305,18 @@ br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap* screen, br_boolean gl
         return BRE_OK;
     }
     if (hVideo->post.program == 0) {
-        hVideo->post.program = compile_program("post.frag", POST_FRAG_GLSL, sizeof(POST_FRAG_GLSL), uniform_names, U_COUNT, hVideo->post.uniforms);
-        hVideo->post.aoProgram = compile_program("ssao.frag", SSAO_FRAG_GLSL, sizeof(SSAO_FRAG_GLSL), ao_uniform_names, A_COUNT, hVideo->post.aoUniforms);
-        if (hVideo->post.program == 0 || hVideo->post.aoProgram == 0) {
+        for (int stage = 0; stage < POST_STAGES; stage++) {
+            char defines[32];
+            snprintf(defines, sizeof(defines), "#define POST_STAGE %d\n", stage);
+            hVideo->post.stagePrograms[stage] = compile_program("post.frag", POST_FRAG_GLSL, sizeof(POST_FRAG_GLSL), uniform_names, U_COUNT,
+                hVideo->post.stageUniforms[stage], defines);
+            if (hVideo->post.stagePrograms[stage] == 0) {
+                return BRE_FAIL;
+            }
+        }
+        hVideo->post.program = hVideo->post.stagePrograms[0];
+        hVideo->post.aoProgram = compile_program("ssao.frag", SSAO_FRAG_GLSL, sizeof(SSAO_FRAG_GLSL), ao_uniform_names, A_COUNT, hVideo->post.aoUniforms, NULL);
+        if (hVideo->post.aoProgram == 0) {
             return BRE_FAIL;
         }
     }
@@ -357,12 +367,87 @@ br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap* screen, br_boolean gl
     return BRE_OK;
 }
 
+/* The uniforms of the post-processing's pass programs (u: one's locations), the same for each */
+static void post_uniforms(HVIDEO hVideo, const GLint* u, const br_gl_post_params* params, int w, int h, int ao, float near_z, float far_z) {
+    glUniform1i(u[U_COLOUR], 0);
+    glUniform1i(u[U_DEPTH], 1);
+    glUniform1i(u[U_GLOW], 2);
+    glUniform1i(u[U_AO], 3);
+    glUniform1i(u[U_AO_DEPTH], 4);
+    glUniform1i(u[U_AO_LINEAR], 12);
+    glUniform4fv(u[U_VIEW], 1, hVideo->post.view);
+    glUniform2fv(u[U_PROJ], 1, hVideo->post.proj);
+    glUniform1f(u[U_NEAR], near_z);
+    glUniform1f(u[U_FAR], far_z);
+    glUniform1f(u[U_TIME], params->time);
+    glUniform1f(u[U_SCALE], h / 1080.0f);
+    glUniform1f(u[U_START], params->dof_start);
+    glUniform1f(u[U_END], params->dof_end);
+    glUniform1f(u[U_MAX_RADIUS], params->dof_max_radius);
+    glUniform1f(u[U_GLOW_STRENGTH], hVideo->post.glowTex != 0 ? params->glow_strength : 0.0f);
+    glUniform1f(u[U_FLARE_STRENGTH], params->flare_strength);
+    glUniform1f(u[U_AO_STRENGTH], ao ? params->ao_strength : 0.0f);
+    glUniform1f(u[U_SPEED], params->speed);
+    glUniform1i(u[U_SHIMMER_COUNT], params->shimmer_count < 8 ? params->shimmer_count : 8);
+    if (params->shimmer_count > 0) {
+        glUniform4fv(u[U_SHIMMERS], params->shimmer_count < 8 ? params->shimmer_count : 8, params->shimmers);
+    }
+    glUniform2f(u[U_GRADE], params->grade, params->night);
+    glUniform1f(u[U_WET], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->wet : 0.0f);
+    glUniform3fv(u[U_UP], 1, params->up);
+    glUniform1f(u[U_ICE], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->ice : 0.0f);
+    glUniform1f(u[U_WATER], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->water : 0.0f);
+    glUniform3fv(u[U_TO_WORLD], 4, params->to_world);
+    glUniform4fv(u[U_SUN], 1, params->sun);
+    glUniform1f(u[U_SPECULAR], params->specular);
+    glUniform3fv(u[U_SUN_DIR], 1, params->sun);
+    /* the sun's shadow maps, those drawn this frame */
+    {
+        static const GLint units[3] = { 5, 6, 7 };
+        float texels[3];
+        int level;
+        for (level = 0; level < 3; level++) {
+            glActiveTexture(GL_TEXTURE5 + level);
+            glBindTexture(GL_TEXTURE_2D, hVideo->shadow.valid[level] ? hVideo->shadow.tex[level] : 0);
+            texels[level] = hVideo->shadow.valid[level] && hVideo->shadow.size[level] > 0 ? 1.0f / hVideo->shadow.size[level] : 0.0f;
+        }
+        glActiveTexture(GL_TEXTURE0);
+        glUniform1iv(u[U_SHADOW_MAP], 3, units);
+        glUniformMatrix4fv(u[U_SHADOW_PROJ], 3, GL_FALSE, &hVideo->shadow.proj[0][0]);
+        glUniform3fv(u[U_SHADOW_VIEW], 12, params->shadow_view);
+        glUniform1fv(u[U_SHADOW_TEXEL], 3, texels);
+    }
+    glUniform1f(u[U_SUN_SHADING], params->sun_shading);
+    glUniform1i(u[U_NORMAL], 8);
+    glUniform1f(u[U_PAINT], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->paint : 0.0f);
+    {
+        int lamps = hVideo->post.viewArea > 0 ? (params->lamp_count < 24 ? params->lamp_count : 24) : 0;
+        glUniform1i(u[U_LAMP_COUNT], lamps);
+        glUniform1f(u[U_RAIN], params->weather[0] > 0.5f ? params->weather[1] : 0.0f);
+        if (lamps > 0) {
+            glUniform4fv(u[U_LAMPS], 2 * lamps, params->lamps);
+        }
+    }
+    glUniform1i(u[U_SUN_HALF], 9);
+    glUniform1i(u[U_WET_HALF], 10);
+    glUniform1i(u[U_DOF_HALF], 11);
+}
+
+/* Draws the post-processing's pass `stage` with its program; what the passes before it made, as flags */
+static void post_stage(HVIDEO hVideo, int stage, int sun_half, int wet_half) {
+    const GLint* u = hVideo->post.stageUniforms[stage];
+    glUseProgram(hVideo->post.stagePrograms[stage]);
+    glUniform1i(u[U_STAGE], stage);
+    glUniform1i(u[U_SUN_HALF_ON], sun_half);
+    glUniform1i(u[U_WET_HALF_ON], wet_half);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+}
+
 void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_params* params) {
     br_device_pixelmap* self = (br_device_pixelmap*)screen;
     HVIDEO hVideo;
     GLboolean sample_shading;
     int split, sun_half, wet_half;
-    GLint* u;
     GLint* a;
     int w, h, ao;
     GLuint ao_depth;
@@ -378,7 +463,6 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     hVideo->post.active = 0;
     w = hVideo->post.width;
     h = hVideo->post.height;
-    u = hVideo->post.uniforms;
     a = hVideo->post.aoUniforms;
     if (hVideo->post.viewArea <= 0) {
         /* no perspective scene: the whole window, with the given depth range */
@@ -469,7 +553,6 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glActiveTexture(GL_TEXTURE0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, w, h);
-    glUseProgram(hVideo->post.program);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, hVideo->post.colourTex);
     glActiveTexture(GL_TEXTURE1);
@@ -481,67 +564,12 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glActiveTexture(GL_TEXTURE4);
     glBindTexture(GL_TEXTURE_2D, ao_depth);
     glActiveTexture(GL_TEXTURE0);
-    glUniform1i(u[U_COLOUR], 0);
-    glUniform1i(u[U_DEPTH], 1);
-    glUniform1i(u[U_GLOW], 2);
-    glUniform1i(u[U_AO], 3);
-    glUniform1i(u[U_AO_DEPTH], 4);
-    glUniform1i(u[U_AO_LINEAR], 12);
-    glUniform4fv(u[U_VIEW], 1, hVideo->post.view);
-    glUniform2fv(u[U_PROJ], 1, hVideo->post.proj);
-    glUniform1f(u[U_NEAR], near_z);
-    glUniform1f(u[U_FAR], far_z);
-    glUniform1f(u[U_TIME], params->time);
-    glUniform1f(u[U_SCALE], h / 1080.0f);
-    glUniform1f(u[U_START], params->dof_start);
-    glUniform1f(u[U_END], params->dof_end);
-    glUniform1f(u[U_MAX_RADIUS], params->dof_max_radius);
-    glUniform1f(u[U_GLOW_STRENGTH], hVideo->post.glowTex != 0 ? params->glow_strength : 0.0f);
-    glUniform1f(u[U_FLARE_STRENGTH], params->flare_strength);
-    glUniform1f(u[U_AO_STRENGTH], ao ? params->ao_strength : 0.0f);
-    glUniform1f(u[U_SPEED], params->speed);
-    glUniform1i(u[U_SHIMMER_COUNT], params->shimmer_count < 8 ? params->shimmer_count : 8);
-    if (params->shimmer_count > 0) {
-        glUniform4fv(u[U_SHIMMERS], params->shimmer_count < 8 ? params->shimmer_count : 8, params->shimmers);
-    }
-    glUniform2f(u[U_GRADE], params->grade, params->night);
-    glUniform1f(u[U_WET], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->wet : 0.0f);
-    glUniform3fv(u[U_UP], 1, params->up);
-    glUniform1f(u[U_ICE], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->ice : 0.0f);
-    glUniform1f(u[U_WATER], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->water : 0.0f);
-    glUniform3fv(u[U_TO_WORLD], 4, params->to_world);
-    glUniform4fv(u[U_SUN], 1, params->sun);
-    glUniform1f(u[U_SPECULAR], params->specular);
-    glUniform3fv(u[U_SUN_DIR], 1, params->sun);
-    /* the sun's shadow maps, those drawn this frame */
-    {
-        static const GLint units[3] = { 5, 6, 7 };
-        float texels[3];
-        int level;
-        for (level = 0; level < 3; level++) {
-            glActiveTexture(GL_TEXTURE5 + level);
-            glBindTexture(GL_TEXTURE_2D, hVideo->shadow.valid[level] ? hVideo->shadow.tex[level] : 0);
-            texels[level] = hVideo->shadow.valid[level] && hVideo->shadow.size[level] > 0 ? 1.0f / hVideo->shadow.size[level] : 0.0f;
-        }
-        glActiveTexture(GL_TEXTURE0);
-        glUniform1iv(u[U_SHADOW_MAP], 3, units);
-        glUniformMatrix4fv(u[U_SHADOW_PROJ], 3, GL_FALSE, &hVideo->shadow.proj[0][0]);
-        glUniform3fv(u[U_SHADOW_VIEW], 12, params->shadow_view);
-        glUniform1fv(u[U_SHADOW_TEXEL], 3, texels);
-    }
-    glUniform1f(u[U_SUN_SHADING], params->sun_shading);
     glActiveTexture(GL_TEXTURE8);
     glBindTexture(GL_TEXTURE_2D, hVideo->post.normalTex);
     glActiveTexture(GL_TEXTURE0);
-    glUniform1i(u[U_NORMAL], 8);
-    glUniform1f(u[U_PAINT], hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 ? params->paint : 0.0f);
-    {
-        int lamps = hVideo->post.viewArea > 0 ? (params->lamp_count < 24 ? params->lamp_count : 24) : 0;
-        glUniform1i(u[U_LAMP_COUNT], lamps);
-        glUniform1f(u[U_RAIN], params->weather[0] > 0.5f ? params->weather[1] : 0.0f);
-        if (lamps > 0) {
-            glUniform4fv(u[U_LAMPS], 2 * lamps, params->lamps);
-        }
+    for (int stage = 0; stage < POST_STAGES; stage++) {
+        glUseProgram(hVideo->post.stagePrograms[stage]);
+        post_uniforms(hVideo, hVideo->post.stageUniforms[stage], params, w, h, ao, near_z, far_z);
     }
     /*
      * The sun's shadow from its maps (the costly part: the search and filter in them) at half resolution, into
@@ -563,19 +591,15 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
     sun_half = sun_half && hVideo->post.sunTex != 0;
-    glUniform1i(u[U_SUN_HALF], 9);
-    glUniform1i(u[U_SUN_HALF_ON], 0);
     if (sun_half) {
         glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.sunFbo);
         glViewport(0, 0, (w + 1) / 2, (h + 1) / 2);
-        glUniform1i(u[U_STAGE], 3);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        post_stage(hVideo, 3, 0, 0);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(0, 0, w, h);
         glActiveTexture(GL_TEXTURE9);
         glBindTexture(GL_TEXTURE_2D, hVideo->post.sunTex);
         glActiveTexture(GL_TEXTURE0);
-        glUniform1i(u[U_SUN_HALF_ON], 1);
     }
     /* the wet ground's reflections (three rays traced through the depth for each pixel) the same way */
     wet_half = hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 && params->wet > 0.0f;
@@ -593,19 +617,15 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
     wet_half = wet_half && hVideo->post.wetTex != 0;
-    glUniform1i(u[U_WET_HALF], 10);
-    glUniform1i(u[U_WET_HALF_ON], 0);
     if (wet_half) {
         glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.wetFbo);
         glViewport(0, 0, (w + 1) / 2, (h + 1) / 2);
-        glUniform1i(u[U_STAGE], 4);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        post_stage(hVideo, 4, sun_half, 0);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(0, 0, w, h);
         glActiveTexture(GL_TEXTURE10);
         glBindTexture(GL_TEXTURE_2D, hVideo->post.wetTex);
         glActiveTexture(GL_TEXTURE0);
-        glUniform1i(u[U_WET_HALF_ON], 1);
     }
 
     /*
@@ -629,10 +649,8 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     split = split && hVideo->post.litTex != 0;
     if (split) {
         glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.litFbo);
-        glUniform1i(u[U_STAGE], 1);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        post_stage(hVideo, 1, sun_half, wet_half);
         draw_weather(hVideo, params, w, h);
-        glUseProgram(hVideo->post.program);
         glBindVertexArray(self->asFront.screen_buffer_vao);
         glDisable(GL_BLEND);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -653,20 +671,16 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
             }
             glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.dofFbo);
             glViewport(0, 0, (w + 1) / 2, (h + 1) / 2);
-            glUniform1i(u[U_STAGE], 5);
-            glDrawArrays(GL_TRIANGLES, 0, 3);
+            post_stage(hVideo, 5, sun_half, wet_half);
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
             glViewport(0, 0, w, h);
             glActiveTexture(GL_TEXTURE11);
             glBindTexture(GL_TEXTURE_2D, hVideo->post.dofTex);
             glActiveTexture(GL_TEXTURE0);
-            glUniform1i(u[U_DOF_HALF], 11);
         }
-        glUniform1i(u[U_STAGE], 2);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        post_stage(hVideo, 2, sun_half, wet_half);
     } else {
-        glUniform1i(u[U_STAGE], 0);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        post_stage(hVideo, 0, sun_half, wet_half);
         draw_weather(hVideo, params, w, h);
     }
 

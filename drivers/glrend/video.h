@@ -37,6 +37,11 @@ typedef struct brender_uniforms {
 
 enum { BRENDER_FULL, BRENDER_OPAQUE, BRENDER_SHADOW, BRENDER_SHADOW_OPAQUE, BRENDER_VARIANTS };
 
+/* post.frag's passes (its stages): 0 all at once, 1 the lit scene, 2 the blurs and the rest of it, 3 the sun's
+ * shadow at half resolution, 4 the wet ground's reflections at half resolution, 5 the depth of field at half
+ * resolution */
+#define POST_STAGES 6
+
 typedef struct _VIDEO {
     GLint maxUniformBlockSize;
     GLint maxUniformBufferBindings;
@@ -166,7 +171,10 @@ typedef struct _VIDEO {
         int sprites; /* what is drawn is sprites, see BrGLSprites */
         int drawSprite; /* the model being drawn is (kept in its state) */
         GLuint program, aoProgram;
-        GLint uniforms[64], aoUniforms[16]; /* (see the uniform lists in post.c) */
+        GLint aoUniforms[16]; /* (see the uniform lists in post.c) */
+        /* post.frag built for each pass (stage, see main in post.frag.glsl), program being the first's */
+        GLuint stagePrograms[POST_STAGES];
+        GLint stageUniforms[POST_STAGES][64];
         GLuint weatherProgram; /* snow and rain particles, see weather.vert.glsl */
         GLint weatherUniforms[24];
         /* the view: the largest perspective scene drawn while active */

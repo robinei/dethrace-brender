@@ -13,6 +13,12 @@ uniform sampler2D uColour;
 // 0: all in one; 1: the lit scene only (into a texture, see post.c), 2: the rest, with uColour that lit scene
 // (mipmapped), so the depth of field and the speed blur blur the shadows and reflections with everything else
 uniform int uStage;
+// (a program is built for each pass, POST_STAGE: the other passes' code left out)
+#ifdef POST_STAGE
+#define STAGE POST_STAGE
+#else
+#define STAGE uStage
+#endif
 // the sun's shadow from its maps at half resolution (stage 3 draws it), and whether there is (see sunShadow)
 uniform sampler2D uSunHalf;
 uniform bool uSunHalfOn;
@@ -964,17 +970,17 @@ vec3 litScene(vec2 p, vec2 size) {
 void main() {
     vec2 size = vec2(textureSize(uColour, 0));
     vec2 p = gl_FragCoord.xy;
-    if (uStage == 3) {
+    if (STAGE == 3) {
         // (every other pixel's, see sunMapsAt)
         fragColour = vec4(sunMaps(floor(p) * 2.0 + 1.0));
         return;
     }
-    if (uStage == 5) {
+    if (STAGE == 5) {
         // (every other pixel's, see dofHalf)
         fragColour = dofHalf(floor(p) * 2.0 + 1.0, size);
         return;
     }
-    if (uStage == 4) {
+    if (STAGE == 4) {
         // (every other pixel's, see wetGroundAt)
         vec2 q = floor(p) * 2.0 + 1.0;
         bool ground = texelFetch(uDepth, ivec2(q), 0).r < 1.0 && flatGround(q, viewPosition(q)) > 0.0;
@@ -982,14 +988,14 @@ void main() {
         return;
     }
     vec3 c;
-    if (uStage == 2) {
+    if (STAGE == 2) {
         c = dof(p, size);
     } else {
         if (uShimmerCount > 0) {
             p = clamp(p + shimmer(p), vec2(0.5), size - 0.5);
         }
         c = litScene(p, size);
-        if (uStage == 1) {
+        if (STAGE == 1) {
             fragColour = vec4(c, 1.0);
             return;
         }
