@@ -34,7 +34,7 @@
 enum {
     U_COLOUR, U_DEPTH, U_GLOW, U_AO, U_VIEW, U_PROJ, U_NEAR, U_FAR, U_TIME, U_SCALE, U_START, U_END, U_MAX_RADIUS,
     U_GLOW_STRENGTH, U_FLARE_STRENGTH, U_AO_STRENGTH, U_SPEED, U_SHIMMER_COUNT, U_SHIMMERS, U_GRADE, U_AO_DEPTH,
-    U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN, U_SHADOW_MAP, U_SHADOW_PROJ, U_SHADOW_VIEW, U_SHADOW_TEXEL, U_SUN_SHADING, U_NORMAL, U_SPECULAR, U_SUN_DIR, U_STAGE, U_LAMPS, U_LAMP_COUNT, U_RAIN, U_SUN_HALF, U_SUN_HALF_ON,
+    U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN, U_SHADOW_MAP, U_SHADOW_PROJ, U_SHADOW_VIEW, U_SHADOW_TEXEL, U_SUN_SHADING, U_NORMAL, U_SPECULAR, U_SUN_DIR, U_STAGE, U_LAMPS, U_LAMP_COUNT, U_RAIN, U_SUN_HALF, U_SUN_HALF_ON, U_WET_HALF, U_WET_HALF_ON,
     U_COUNT
 };
 /* (they must fit hVideo->post.uniforms) */
@@ -42,7 +42,7 @@ typedef char post_uniforms_fit[U_COUNT <= 64 ? 1 : -1];
 static const char* uniform_names[U_COUNT] = {
     "uColour", "uDepth", "uGlow", "uAO", "uView", "uProj", "uNear", "uFar", "uTime", "uScale", "uStart", "uEnd",
     "uMaxRadius", "uGlowStrength", "uFlareStrength", "uAOStrength", "uSpeed", "uShimmerCount", "uShimmers", "uGrade", "uAODepth",
-    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun", "uShadowMap", "uShadowProj", "uShadowView", "uShadowTexel", "uSunShading", "uNormal", "uSpecular", "uSunDir", "uStage", "uLamps", "uLampCount", "uRain", "uSunHalf", "uSunHalfOn"
+    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun", "uShadowMap", "uShadowProj", "uShadowView", "uShadowTexel", "uSunShading", "uNormal", "uSpecular", "uSunDir", "uStage", "uLamps", "uLampCount", "uRain", "uSunHalf", "uSunHalfOn", "uWetHalf", "uWetHalfOn"
 };
 enum {
     W_TO_WORLD, W_VIEW, W_PROJ, W_SIZE, W_TIME, W_SCALE, W_RAIN, W_BOX, W_DEPTH, W_NEAR, W_FAR, W_BRIGHTNESS, W_AMOUNT,
@@ -81,6 +81,9 @@ static void delete_targets(HVIDEO hVideo) {
     glDeleteFramebuffers(1, &hVideo->post.sunFbo);
     glDeleteTextures(1, &hVideo->post.sunTex);
     hVideo->post.sunFbo = hVideo->post.sunTex = 0;
+    glDeleteFramebuffers(1, &hVideo->post.wetFbo);
+    glDeleteTextures(1, &hVideo->post.wetTex);
+    hVideo->post.wetFbo = hVideo->post.wetTex = 0;
     hVideo->post.aoDepthFbo = hVideo->post.aoDepthTex = 0;
     hVideo->post.msaaFbo = hVideo->post.msaaColour = hVideo->post.msaaGlow = hVideo->post.msaaDepth = 0;
     hVideo->post.resolveFbo = hVideo->post.colourTex = hVideo->post.glowTex = hVideo->post.depthTex = 0;
@@ -347,7 +350,7 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     br_device_pixelmap* self = (br_device_pixelmap*)screen;
     HVIDEO hVideo;
     GLboolean sample_shading;
-    int split, sun_half;
+    int split, sun_half, wet_half;
     GLint* u;
     GLint* a;
     int w, h, ao;
@@ -549,6 +552,36 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
         glActiveTexture(GL_TEXTURE0);
         glUniform1i(u[U_SUN_HALF_ON], 1);
     }
+    /* the wet ground's reflections (three rays traced through the depth for each pixel) the same way */
+    wet_half = hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 && params->wet > 0.0f;
+    if (wet_half && hVideo->post.wetTex == 0) {
+        hVideo->post.wetTex = create_texture(GL_RGBA16F, (w + 1) / 2, (h + 1) / 2, GL_RGBA, GL_HALF_FLOAT, GL_NEAREST, 0);
+        glGenFramebuffers(1, &hVideo->post.wetFbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.wetFbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, hVideo->post.wetTex, 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            BR_WARNING0("GLREND: post-processing wet ground framebuffer incomplete");
+            glDeleteFramebuffers(1, &hVideo->post.wetFbo);
+            glDeleteTextures(1, &hVideo->post.wetTex);
+            hVideo->post.wetFbo = hVideo->post.wetTex = 0;
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+    wet_half = wet_half && hVideo->post.wetTex != 0;
+    glUniform1i(u[U_WET_HALF], 10);
+    glUniform1i(u[U_WET_HALF_ON], 0);
+    if (wet_half) {
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.wetFbo);
+        glViewport(0, 0, (w + 1) / 2, (h + 1) / 2);
+        glUniform1i(u[U_STAGE], 4);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, w, h);
+        glActiveTexture(GL_TEXTURE10);
+        glBindTexture(GL_TEXTURE_2D, hVideo->post.wetTex);
+        glActiveTexture(GL_TEXTURE0);
+        glUniform1i(u[U_WET_HALF_ON], 1);
+    }
 
     /*
      * With the depth of field or the speed blur, in two: the lit scene (and the weather) into litTex, then the
@@ -591,6 +624,8 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     }
 
     glBindVertexArray(0);
+    glActiveTexture(GL_TEXTURE10);
+    glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE9);
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE8);

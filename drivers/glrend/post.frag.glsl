@@ -16,6 +16,9 @@ uniform int uStage;
 // the sun's shadow from its maps at half resolution (stage 3 draws it), and whether there is (see sunShadow)
 uniform sampler2D uSunHalf;
 uniform bool uSunHalfOn;
+// the wet ground's reflections at half resolution (stage 4 draws them), and whether there are (see wetGroundAt)
+uniform sampler2D uWetHalf;
+uniform bool uWetHalfOn;
 // lamps (street lamps, neon, signs) the air glows around at night: view space position and the reach of the glow,
 // colour and strength
 uniform vec4 uLamps[48];
@@ -402,6 +405,37 @@ vec3 wetGround(vec2 p, vec2 size) {
     sum /= max(rays, 1.0);
     float fresnel = 0.15 + 0.85 * grazing * grazing * grazing;
     return crests + sum * fresnel * flat_ground * uWet * (0.3 + 0.7 * wet) * (1.0 - 0.85 * grass);
+}
+
+// wetGround at window pixel p: drawn at half resolution (stage 4: of every other pixel, alpha 1 where that is wet
+// ground), taken from there with depth aware weights; none where p isn't flat ground
+vec3 wetGroundAt(vec2 p, vec2 size) {
+    if (!uWetHalfOn) {
+        return wetGround(p, size);
+    }
+    if (texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
+        return vec3(0.0);
+    }
+    vec3 P = viewPosition(p);
+    if (flatGround(p, P) <= 0.0) {
+        return vec3(0.0);
+    }
+    float z = -P.z;
+    vec2 h = floor(p * 0.5);
+    ivec2 last = textureSize(uWetHalf, 0) - 1;
+    vec3 sum = vec3(0.0);
+    float weight = 0.0;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            ivec2 q = clamp(ivec2(h) + ivec2(x, y), ivec2(0), last);
+            vec4 t = texelFetch(uWetHalf, q, 0);
+            float zq = linearDepth(texelFetch(uDepth, q * 2 + 1, 0).r);
+            float w = t.a * exp(-abs(zq - z) / max(0.02 * z, 0.01)) * (x == 0 && y == 0 ? 2.0 : 1.0);
+            sum += t.rgb * w;
+            weight += w;
+        }
+    }
+    return weight > 0.0001 ? sum / weight : wetGround(p, size);
 }
 
 // the ripples on water at view space point P: how they shift its mirror image, in window pixels
@@ -883,7 +917,7 @@ vec3 litScene(vec2 p, vec2 size) {
         c = mirror(p, size, c);
     }
     if (uWet > 0.0) {
-        c += wetGround(p, size);
+        c += wetGroundAt(p, size);
     }
     if (uLampCount > 0) {
         c += lampHaze(p);
@@ -897,6 +931,13 @@ void main() {
     if (uStage == 3) {
         // (every other pixel's, see sunMapsAt)
         fragColour = vec4(sunMaps(floor(p) * 2.0 + 1.0));
+        return;
+    }
+    if (uStage == 4) {
+        // (every other pixel's, see wetGroundAt)
+        vec2 q = floor(p) * 2.0 + 1.0;
+        bool ground = texelFetch(uDepth, ivec2(q), 0).r < 1.0 && flatGround(q, viewPosition(q)) > 0.0;
+        fragColour = ground ? vec4(wetGround(q, size), 1.0) : vec4(0.0);
         return;
     }
     vec3 c;

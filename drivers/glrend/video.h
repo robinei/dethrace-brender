@@ -141,6 +141,7 @@ typedef struct _VIDEO {
         GLuint aoDepthFbo, aoDepthTex; /* the depth snapshot the ambient occlusion uses, see BrGLPostProcessDepthSnapshot */
         GLuint litFbo, litTex; /* the lit scene, for the blurs (made when first needed), see BrGLPostProcessEnd */
         GLuint sunFbo, sunTex; /* the sun's shadow from its maps, half resolution (made when first needed) */
+        GLuint wetFbo, wetTex; /* the wet ground's reflections, half resolution (made when first needed) */
         int depthSnapshot;
         float softDistance; /* soft particles: what is drawn fades out this close to the snapshot depth, 0 for off */
         float drawSoftDistance; /* that of the models being drawn (kept in their state, see state_stack) */
