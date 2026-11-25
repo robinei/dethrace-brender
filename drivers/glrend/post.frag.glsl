@@ -212,19 +212,24 @@ float ambientOcclusion(vec2 p) {
     if (linearDepth(texelFetch(uDepth, ivec2(p), 0).r) < z * 0.99 - 0.005) {
         return 1.0;
     }
-    vec2 h = p * 0.5;
+    // the four half resolution pixels around (their centres every other window pixel), bilinear and by how
+    // near their distances are to this one's
+    vec2 h = p * 0.5 - 0.5;
+    vec2 f = fract(h);
+    ivec2 base = ivec2(floor(h));
+    ivec2 last = textureSize(uAO, 0) - 1;
     float sum = 0.0;
     float weight = 0.0;
-    for (int y = -1; y <= 1; y++) {
-        for (int x = -1; x <= 1; x++) {
-            vec2 q = h + vec2(float(x), float(y));
-            float zq = texelFetch(uAOLinear, ivec2(q), 0).r;
-            float w = exp(-abs(zq - z) / max(0.02 * z, 0.01)) * (x == 0 && y == 0 ? 2.0 : 1.0);
-            sum += texelFetch(uAO, ivec2(q), 0).r * w;
+    for (int y = 0; y <= 1; y++) {
+        for (int x = 0; x <= 1; x++) {
+            ivec2 q = clamp(base + ivec2(x, y), ivec2(0), last);
+            float zq = texelFetch(uAOLinear, q, 0).r;
+            float w = ((x == 1 ? f.x : 1.0 - f.x) * (y == 1 ? f.y : 1.0 - f.y) + 0.01) * exp(-abs(zq - z) / max(0.02 * z, 0.01));
+            sum += texelFetch(uAO, q, 0).r * w;
             weight += w;
         }
     }
-    return sum / max(weight, 0.0001);
+    return weight > 0.0001 ? sum / weight : 1.0;
 }
 
 vec3 viewPosition(vec2 px) {
@@ -940,18 +945,16 @@ vec3 lampHaze(vec2 p) {
 // The scene lit: ambient occlusion, the sun's shadows and highlights, reflections, wet ground
 vec3 litScene(vec2 p, vec2 size) {
     vec3 c = texelFetch(uColour, ivec2(p), 0).rgb;
+    // light sources (neither occluded nor shadowed)
+    float lit = uGlowStrength > 0.0 ? clamp(dot(texelFetch(uGlow, ivec2(p), 0).rgb, vec3(4.0)), 0.0, 1.0) : 0.0;
     if (uAOStrength > 0.0) {
         float ao = ambientOcclusion(p);
-        // light sources aren't occluded
-        float lit = uGlowStrength > 0.0 ? clamp(dot(textureLod(uGlow, p / size, 0.0).rgb, vec3(4.0)), 0.0, 1.0) : 0.0;
         // up to 1 blends the occlusion in, above that it deepens (ao^strength)
         float shade = uAOStrength <= 1.0 ? mix(1.0, ao, uAOStrength) : pow(ao, uAOStrength);
         c *= mix(1.0, shade, 1.0 - lit);
     }
     vec3 base = c;
     if (uSun.w > 0.0) {
-        // (light sources aren't shadowed)
-        float lit = uGlowStrength > 0.0 ? clamp(dot(textureLod(uGlow, p / size, 0.0).rgb, vec3(4.0)), 0.0, 1.0) : 0.0;
         c *= mix(1.0, sunShadow(p, size), 1.0 - lit);
     }
     if (uSpecular > 0.0) {
