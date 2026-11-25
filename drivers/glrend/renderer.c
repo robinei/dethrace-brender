@@ -132,9 +132,9 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
         int count = hVideo->sceneLighting != NULL ? hVideo->sceneLighting(&brightness, &lights) : 0;
         float surface[BR_GL_SCENE_SURFACE_FLOATS] = { 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
         static const int scene_variants[] = { BRENDER_OPAQUE, BRENDER_FULL };
-        static const int shadow_variants[] = { BRENDER_SHADOW };
+        static const int shadow_variants[] = { BRENDER_SHADOW_OPAQUE, BRENDER_SHADOW };
         const int* which = hVideo->shadow.active ? shadow_variants : scene_variants;
-        int n = hVideo->shadow.active ? 1 : 2;
+        int n = 2;
 
         if (count > BR_GL_MAX_SCENE_LIGHTS) {
             count = BR_GL_MAX_SCENE_LIGHTS;

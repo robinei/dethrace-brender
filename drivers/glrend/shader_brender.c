@@ -118,6 +118,9 @@ static void VIDEOI_GetShaderVariables(HVIDEO hVideo) {
 
 /* Draws with brender.vert/frag as built for `which` (BRENDER_*, or BRENDER_FULL if that didn't build) */
 void VIDEOI_UseBRenderVariant(HVIDEO hVideo, int which) {
+    if (which == BRENDER_SHADOW_OPAQUE && hVideo->variants[which].program == 0) {
+        which = BRENDER_SHADOW;
+    }
     if (hVideo->variants[which].program == 0) {
         which = BRENDER_FULL;
     }
@@ -210,6 +213,8 @@ br_boolean VIDEOI_CompileBRenderShader(HVIDEO hVideo, const char* vertPath, cons
         if (hVideo->variants[BRENDER_SHADOW].program == 0) {
             BR_WARNING0("VIDEO: no shadow pass program, the shadow maps are drawn with the full one");
         }
+        hVideo->variants[BRENDER_SHADOW_OPAQUE].program = compile_variant(hVideo, "brender (shadow pass, opaque)",
+            "#define SHADOW_PASS\n#define OPAQUE\n", &hVideo->variants[BRENDER_SHADOW_OPAQUE].uniforms);
     }
 
     GL_CHECK_ERROR();

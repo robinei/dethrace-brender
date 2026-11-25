@@ -35,7 +35,7 @@ typedef struct brender_uniforms {
     GLint surface_haze;      /* vec4[2] */
 } brender_uniforms;
 
-enum { BRENDER_FULL, BRENDER_OPAQUE, BRENDER_SHADOW, BRENDER_VARIANTS };
+enum { BRENDER_FULL, BRENDER_OPAQUE, BRENDER_SHADOW, BRENDER_SHADOW_OPAQUE, BRENDER_VARIANTS };
 
 typedef struct _VIDEO {
     GLint maxUniformBlockSize;
@@ -105,7 +105,8 @@ typedef struct _VIDEO {
      *   what has no colour key's cut-outs, isn't blended or soft, when there are no clip planes
      * - BRENDER_SHADOW: SHADOW_PASS, only what decides the depth (the position and the colour key's cut-outs), for
      *   the sun's shadow maps
-     * (0 for one that didn't build: BRENDER_FULL instead)
+     * - BRENDER_SHADOW_OPAQUE: SHADOW_PASS and OPAQUE, only the position: the shadow maps' opaque draws
+     * (0 for one that didn't build: BRENDER_FULL instead, BRENDER_SHADOW for BRENDER_SHADOW_OPAQUE)
      */
     struct {
         GLuint program;

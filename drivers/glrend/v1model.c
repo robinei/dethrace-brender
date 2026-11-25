@@ -303,16 +303,21 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
         /*
          * The program: what can't have anything cut out (no colour key texels, not blended or soft edged, no clip
          * planes) is drawn with the one that has no discard, which lets the GPU test the depth before shading; the
-         * rest with the full one. (The sun's shadow maps: theirs, see sceneBegin. Until a texture has been looked
-         * at, the full one.)
+         * rest with the full one; the same for the sun's shadow maps with theirs. (Until a texture has been looked
+         * at, the one with discard.)
          */
-        if (!hVideo->shadow.active) {
+        {
             br_buffer_stored* map = state->prim.colour_map;
             br_boolean blended = (state->prim.flags & PRIMF_BLEND) || (map != NULL && map->blended);
             br_boolean cut = map != NULL
                 && ((!map->reflect_checked || (map->reflect < -0.45f && map->reflect > -0.55f))
                     || ((state->prim.flags & PRIMF_COLOUR_KEY) && !map->opaque));
-            VIDEOI_UseBRenderVariant(hVideo, blended || cut || hVideo->sceneClipPlanes ? BRENDER_FULL : BRENDER_OPAQUE);
+            if (hVideo->shadow.active) {
+                /* (what is blended casts no shadow, see below) */
+                VIDEOI_UseBRenderVariant(hVideo, cut || hVideo->sceneClipPlanes ? BRENDER_SHADOW : BRENDER_SHADOW_OPAQUE);
+            } else {
+                VIDEOI_UseBRenderVariant(hVideo, blended || cut || hVideo->sceneClipPlanes ? BRENDER_FULL : BRENDER_OPAQUE);
+            }
         }
 
         if (state->prim.flags & PRIMF_COLOUR_WRITE)
