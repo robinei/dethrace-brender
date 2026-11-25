@@ -641,7 +641,7 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     /* the bloom and lens flare at half resolution, into glowHalfTex (see uGlowHalf in post.frag.glsl) */
     if (hVideo->post.glowTex != 0 && params->glow_strength > 0.0f) {
         if (hVideo->post.glowHalfTex == 0) {
-            hVideo->post.glowHalfTex = create_texture(GL_RGBA16F, (w + 1) / 2, (h + 1) / 2, GL_RGBA, GL_HALF_FLOAT, GL_LINEAR, 0);
+            hVideo->post.glowHalfTex = create_texture(GL_R11F_G11F_B10F, (w + 1) / 2, (h + 1) / 2, GL_RGB, GL_HALF_FLOAT, GL_LINEAR, 0);
             glGenFramebuffers(1, &hVideo->post.glowHalfFbo);
             glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.glowHalfFbo);
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, hVideo->post.glowHalfTex, 0);
@@ -665,7 +665,8 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
      */
     split = params->dof_max_radius > 0.0f || params->speed > 0.0f;
     if (split && hVideo->post.litTex == 0) {
-        hVideo->post.litTex = create_texture(GL_RGBA16F, w, h, GL_RGBA, GL_HALF_FLOAT, GL_LINEAR, 1);
+        /* (no alpha: 4 bytes a pixel, a float's range) */
+        hVideo->post.litTex = create_texture(GL_R11F_G11F_B10F, w, h, GL_RGB, GL_HALF_FLOAT, GL_LINEAR, 1);
         glGenFramebuffers(1, &hVideo->post.litFbo);
         glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.litFbo);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, hVideo->post.litTex, 0);
