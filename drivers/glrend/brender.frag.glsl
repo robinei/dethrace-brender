@@ -339,11 +339,11 @@ vec3 surfaceNormal(vec3 p, vec3 vertex_n) {
     return n;
 }
 
-vec3 surfaceShading(vec3 model_pos, vec3 p, vec3 vertex_n, vec2 uv, vec2 relief_uv) {
+// (n: surfaceNormal's)
+vec3 surfaceShading(vec3 model_pos, vec3 p, vec3 n, vec2 uv, vec2 relief_uv) {
     vec3 shade = vec3(1.0);
     if (surface_sun.w > 0.0) {
         // relative to the ground, which keeps its brightness: walls turned away from the sun darken
-        vec3 n = surfaceNormal(p, vertex_n);
         if (dot(n, n) < 0.5) {
             return shade;
         }
@@ -621,10 +621,15 @@ void main() {
     } else {
         fragColour.rgb = textureColour.rgb;
     }
+    // the surface's normal, for the sun shading and the post-processing
+    vec3 sn = vec3(0.0);
+    if (F_SHADING || F_POST) {
+        sn = surfaceNormal(position.xyz, normal.xyz);
+    }
     // (the track materials are lit or not as their files say, so this goes by whether there is a normal:
     // not for the sprites)
     if (F_SHADING && (surface_sun.w > 0.0 || surface_up.w > 0.0) && !disable_texture && dot(normal.xyz, normal.xyz) > 0.01) {
-        fragColour.rgb *= surfaceShading(rawPosition, position.xyz, normal.xyz, mappedUV, reliefUV);
+        fragColour.rgb *= surfaceShading(rawPosition, position.xyz, sn, mappedUV, reliefUV);
     }
 
     if (F_WEAR && surface_wear > 0.0 && !disable_texture) {
@@ -712,7 +717,6 @@ void main() {
     if (!F_POST) {
         normalColour = vec4(0.0);
     } else {
-        vec3 sn = surfaceNormal(position.xyz, normal.xyz);
         normalColour = dot(sn, sn) > 0.5 ? vec4(sn * 0.5 + 0.5, surface_sprite ? 1.0 : 2.0 / 3.0) : vec4(0.5, 0.5, 1.0, surface_sprite ? 1.0 : 0.0);
     }
 }
