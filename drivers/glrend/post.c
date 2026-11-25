@@ -521,9 +521,9 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glDisable(GL_SAMPLE_SHADING);
     glBindVertexArray(self->asFront.screen_buffer_vao);
 
-    if (ao) {
-        /* the distance at half resolution into aoTex[2]; ambient occlusion into aoTex[0], blurred horizontally
-         * into aoTex[1], and vertically back */
+    /* (for the ambient occlusion, and the reflections' march) */
+    if (ao || (hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 && (params->ice > 0.0f || params->water > 0.0f || params->paint > 0.0f))) {
+        /* the distance at half resolution into aoTex[2] */
         glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.aoFbo[2]);
         glViewport(0, 0, (w + 1) / 2, (h + 1) / 2);
         glUseProgram(hVideo->post.aoProgram);
@@ -536,6 +536,16 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
         glUniform1f(a[A_NEAR], near_z);
         glUniform1f(a[A_FAR], far_z);
         glDrawArrays(GL_TRIANGLES, 0, 3);
+    }
+    if (ao) {
+        /* ambient occlusion into aoTex[0], blurred horizontally into aoTex[1], and vertically back */
+        glViewport(0, 0, (w + 1) / 2, (h + 1) / 2);
+        glUseProgram(hVideo->post.aoProgram);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, ao_depth);
+        glUniform1i(a[A_DEPTH], 0);
+        glUniform1i(a[A_AO], 1);
+        glUniform1i(a[A_LINEAR], 2);
         glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D, hVideo->post.aoTex[2]);
         glActiveTexture(GL_TEXTURE0);

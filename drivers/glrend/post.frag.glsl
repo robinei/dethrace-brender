@@ -272,10 +272,10 @@ vec2 traceReflection(vec3 P, vec3 n, vec3 ray, vec2 p, float jitter_amount, out 
         if (s.x < uView.x || s.y < uView.y || s.x >= uView.x + uView.z || s.y >= uView.y + uView.w) {
             break;
         }
-        float ds = texelFetch(uDepth, ivec2(s), 0).r;
+        // (the distance at half resolution: see uAOLinear)
+        float zs = texelFetch(uAOLinear, ivec2(s * 0.5), 0).r;
         last = s;
-        over_sky = ds >= 1.0;
-        float zs = linearDepth(ds);
+        over_sky = zs >= uFar * 0.999;
         float behind = -q.z - zs;
         hidden = hidden || behind > 0.0;
         if (behind > 0.0 && behind < step_len * 1.5 + 0.02 * zs) {
@@ -284,7 +284,7 @@ vec2 traceReflection(vec3 P, vec3 n, vec3 ray, vec2 p, float jitter_amount, out 
             vec3 b = q;
             for (int k = 0; k < 4; k++) {
                 vec3 m = (a + b) * 0.5;
-                float zm = linearDepth(texelFetch(uDepth, ivec2(toWindow(m)), 0).r);
+                float zm = texelFetch(uAOLinear, ivec2(toWindow(m) * 0.5), 0).r;
                 if (-m.z > zm) {
                     b = m;
                 } else {
