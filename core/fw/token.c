@@ -47,6 +47,20 @@ static struct token_type tokenTypes[] = {
 };
 
 /*
+ * The type of each token, by its value (for those below TYPE_TABLE_SIZE): BrTokenType is asked for every token
+ * of every value set (for each model drawn), and searching the list of all the tokens for it took a large part
+ * of the time spent drawing
+ */
+#define TYPE_TABLE_SIZE 4096
+static br_token tokenTypeTable[TYPE_TABLE_SIZE];
+
+static void setTokenType(br_token token, br_token type)
+{
+	if(token < TYPE_TABLE_SIZE)
+		tokenTypeTable[token] = type;
+}
+
+/*
  * Initialise the token list
  */
 void BrTokenBegin(void)
@@ -61,8 +75,10 @@ void BrTokenBegin(void)
 	/*
 	 * Add all the predefined tokens
 	 */
-	for(i=0; i < BR_ASIZE(predefinedTokens); i++)
+	for(i=0; i < BR_ASIZE(predefinedTokens); i++) {
 		BR_ADDHEAD(&fw.tokens, predefinedTokens+i);
+		setTokenType(predefinedTokens[i].token, predefinedTokens[i].type);
+	}
 
 	/*
 	 * Setup next unused token id
@@ -142,6 +158,7 @@ br_token BR_RESIDENT_ENTRY BrTokenCreate(char *identifier, br_token type)
 	te->token = fw.next_free_token++;
 
 	BR_ADDHEAD(&fw.tokens, te);
+	setTokenType(te->token, te->type);
 
 	return te->token;
 }
@@ -166,6 +183,9 @@ char * BR_RESIDENT_ENTRY BrTokenIdentifier(br_token t)
 br_token BR_RESIDENT_ENTRY BrTokenType(br_token t)
 {
 	br_token_entry *te;
+
+	if(t < TYPE_TABLE_SIZE)
+		return tokenTypeTable[t];
 
 	BR_FOR_LIST(&fw.tokens, te)
 		if(t == te->token)
