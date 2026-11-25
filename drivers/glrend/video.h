@@ -115,7 +115,19 @@ typedef struct _VIDEO {
         brender_uniforms uniforms;
         float surfaceUploaded[BR_GL_SCENE_SURFACE_FLOATS]; /* the scene_surface parameters last given to it */
         int drawSpots[BR_GL_MAX_SCENE_LIGHTS], drawSpotCount; /* the draw_spots last given to it */
+        /* the per draw uniforms last given to it (see apply_stored_properties; reset by sceneBegin) */
+        float glowIntensity, reflect, wear, softDistance;
+        int sharp, sprite, soft, alphaToCoverage;
     } variants[BRENDER_VARIANTS], *variant; /* (the one in use) */
+    /*
+     * The GL state the draws of a scene last set (see apply_stored_properties): what is already so isn't set again.
+     * -1 for not known (sceneBegin resets it, as anything may have changed it in between)
+     */
+    struct {
+        int colourMask, normalsMask, blend, alphaToCoverage, depthTest, depthMask;
+        GLint depthFunc;
+        GLint blendFunc[4];
+    } drawState;
     const float* sceneLights; /* the scene's lights (spots), as the scene_lighting callback gave them */
     int sceneLightCount;
     int sceneClipPlanes; /* the scene being drawn has clip planes (only BRENDER_FULL clips) */

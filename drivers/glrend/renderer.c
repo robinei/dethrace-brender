@@ -97,8 +97,9 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
     StateGLReset(&self->state.cache);
     StateGLUpdateScene(&self->state.cache, self->state.current);
 
-    /* (something else may have been drawn with another program since) */
+    /* (something else may have been drawn with another program, and other state, since) */
     hVideo->variant = NULL;
+    memset(&hVideo->drawState, 0xff, sizeof(hVideo->drawState));
     VIDEOI_UseBRenderVariant(hVideo, BRENDER_FULL);
     hVideo->sceneClipPlanes = self->state.cache.scene.num_clip_planes > 0;
     glBindBufferBase(GL_UNIFORM_BUFFER, hVideo->brenderProgram.blockBindingScene, hVideo->brenderProgram.uboScene);
@@ -166,6 +167,10 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
             glUniform1f(u->glow_intensity, 0.0f);
             glUniform1i(u->alpha_to_coverage, hVideo->sampleBuffers != 0);
             glUniform1i(u->fog_distance, hVideo->fogDistance != 0);
+            /* (the per draw ones: not known) */
+            hVideo->variant->glowIntensity = hVideo->variant->reflect = hVideo->variant->wear = hVideo->variant->softDistance = -2.0f;
+            hVideo->variant->sharp = hVideo->variant->sprite = hVideo->variant->soft = -1;
+            hVideo->variant->alphaToCoverage = hVideo->sampleBuffers != 0;
         }
     }
     if (hVideo->post.active) {

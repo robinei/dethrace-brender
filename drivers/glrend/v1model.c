@@ -7,7 +7,47 @@
 #include "xbr.h"
 #include <string.h>
 
-static void apply_blend_mode(state_stack* self, br_boolean keep_alpha) {
+/*
+ * State set only when it changes (see hVideo->drawState and the variants' per draw uniforms): a scene sets the same
+ * state over and over, which costs the driver as much as a change
+ */
+static void set_cap(GLenum cap, int* cached, int on) {
+    if (*cached != on) {
+        if (on) {
+            glEnable(cap);
+        } else {
+            glDisable(cap);
+        }
+        *cached = on;
+    }
+}
+
+static void set_uniform1f(GLint location, float* cached, float v) {
+    if (*cached != v) {
+        glUniform1f(location, v);
+        *cached = v;
+    }
+}
+
+static void set_uniform1i(GLint location, int* cached, int v) {
+    if (*cached != v) {
+        glUniform1i(location, v);
+        *cached = v;
+    }
+}
+
+static void set_blend_func(HVIDEO hVideo, GLenum src, GLenum dst, GLenum src_alpha, GLenum dst_alpha) {
+    GLint* c = hVideo->drawState.blendFunc;
+    if (c[0] != (GLint)src || c[1] != (GLint)dst || c[2] != (GLint)src_alpha || c[3] != (GLint)dst_alpha) {
+        glBlendFuncSeparate(src, dst, src_alpha, dst_alpha);
+        c[0] = src;
+        c[1] = dst;
+        c[2] = src_alpha;
+        c[3] = dst_alpha;
+    }
+}
+
+static void apply_blend_mode(HVIDEO hVideo, state_stack* self, br_boolean keep_alpha) {
     /* C_result = (C_source * F_Source) + (C_dest * F_dest) */
     /* keep_alpha: the destination alpha stays (the glow attachment's alpha is the reflection mask, see below) */
     GLenum src_alpha = keep_alpha ? GL_ZERO : GL_ONE;
@@ -25,7 +65,7 @@ static void apply_blend_mode(state_stack* self, br_boolean keep_alpha) {
          * Colour = (alpha * src) + ((1 - alpha) * dest)
          * Alpha  = (1     * src) + (0           * dest)
          */
-        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, src_alpha, dst_alpha);
+        set_blend_func(hVideo, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, src_alpha, dst_alpha);
         break;
 
     case BRT_BLEND_SUMMED:
@@ -34,7 +74,7 @@ static void apply_blend_mode(state_stack* self, br_boolean keep_alpha) {
          * Colour = (alpha * src) + (1 * dest)
          * Alpha  = (1     * src) + (0 * dest)
          */
-        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE, src_alpha, dst_alpha);
+        set_blend_func(hVideo, GL_SRC_ALPHA, GL_ONE, src_alpha, dst_alpha);
         break;
 
     case BRT_BLEND_PREMULTIPLIED:
@@ -43,7 +83,7 @@ static void apply_blend_mode(state_stack* self, br_boolean keep_alpha) {
          * Colour = (1 * src) + ((1 - alpha) * dest)
          * Alpha  = (1 * src) + (0           * dest)
          */
-        glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, src_alpha, dst_alpha);
+        set_blend_func(hVideo, GL_ONE, GL_ONE_MINUS_SRC_ALPHA, src_alpha, dst_alpha);
         break;
     }
     GL_CHECK_ERROR();
@@ -69,16 +109,17 @@ static void apply_depth_properties(HVIDEO hVideo, state_stack* state, uint32_t s
 
     if (depth_valid == BR_TRUE) {
         if (depth_test == GL_TRUE)
-            glEnable(GL_DEPTH_TEST);
+            set_cap(GL_DEPTH_TEST, &hVideo->drawState.depthTest, 1);
         else if (depth_test == GL_FALSE)
-            glDisable(GL_DEPTH_TEST);
+            set_cap(GL_DEPTH_TEST, &hVideo->drawState.depthTest, 0);
     }
 
     if (states & MASK_STATE_PRIMITIVE) {
-        if ((state->prim.flags & PRIMF_DEPTH_WRITE) && (hVideo->depthWrite == NULL || hVideo->depthWrite()))
-            glDepthMask(GL_TRUE);
-        else
-            glDepthMask(GL_FALSE);
+        int mask = (state->prim.flags & PRIMF_DEPTH_WRITE) && (hVideo->depthWrite == NULL || hVideo->depthWrite());
+        if (hVideo->drawState.depthMask != mask) {
+            glDepthMask(mask ? GL_TRUE : GL_FALSE);
+            hVideo->drawState.depthMask = mask;
+        }
 
         GLenum depthFunc;
         switch (state->prim.depth_test) {
@@ -109,7 +150,10 @@ static void apply_depth_properties(HVIDEO hVideo, state_stack* state, uint32_t s
         default:
             depthFunc = GL_LESS;
         }
-        glDepthFunc(depthFunc);
+        if (hVideo->drawState.depthFunc != (GLint)depthFunc) {
+            glDepthFunc(depthFunc);
+            hVideo->drawState.depthFunc = depthFunc;
+        }
     }
     GL_CHECK_ERROR();
 }
@@ -320,10 +364,15 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
             }
         }
 
-        if (state->prim.flags & PRIMF_COLOUR_WRITE)
-            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        else
-            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        {
+            int write = (state->prim.flags & PRIMF_COLOUR_WRITE) != 0;
+            if (hVideo->drawState.colourMask != write) {
+                glColorMask(write, write, write, write);
+                hVideo->drawState.colourMask = write;
+                /* (that covers the normals' attachment too) */
+                hVideo->drawState.normalsMask = write;
+            }
+        }
 
         if (state->prim.colour_map) {
             model->disable_colour_key = !(state->prim.flags & PRIMF_COLOUR_KEY);
@@ -359,10 +408,10 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
                 glActiveTexture(GL_TEXTURE1);
                 glBindTexture(GL_TEXTURE_2D, state->prim.colour_map->glow_tex);
                 glActiveTexture(GL_TEXTURE0);
-                glUniform1f(hVideo->variant->uniforms.glow_intensity, state->prim.colour_map->glow_intensity
+                set_uniform1f(hVideo->variant->uniforms.glow_intensity, &hVideo->variant->glowIntensity, state->prim.colour_map->glow_intensity
                         * (hVideo->glowScale != NULL ? hVideo->glowScale(state->prim.colour_map->glow_id) : 1.0f));
             } else {
-                glUniform1f(hVideo->variant->uniforms.glow_intensity, 0.0f);
+                set_uniform1f(hVideo->variant->uniforms.glow_intensity, &hVideo->variant->glowIntensity, 0.0f);
             }
 
             // glUniform1i(hVideo->variant->uniforms.main_texture, hVideo->brenderProgram.mainTextureBinding);
@@ -373,7 +422,7 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
             // todo?
             model->disable_colour_key = 0;
             glBindTexture(GL_TEXTURE_2D, tex_default);
-            glUniform1f(hVideo->variant->uniforms.glow_intensity, 0.0f);
+            set_uniform1f(hVideo->variant->uniforms.glow_intensity, &hVideo->variant->glowIntensity, 0.0f);
             model->disable_texture = 1;
             // BrVector4Set(&model->surface_colour, 0, 1, 0, 1);
             // glBindTexture(GL_TEXTURE_2D, 27);
@@ -391,7 +440,7 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
         if (sharp) {
             filter = BRT_LINEAR;
         }
-        glUniform1i(hVideo->variant->uniforms.sharp_filter, sharp);
+        set_uniform1i(hVideo->variant->uniforms.sharp_filter, &hVideo->variant->sharp, sharp);
         /*
          * Materials request mipmapping through BR_MATF_MAP_ANTIALIASING (mip_map), while
          * BR_MATF_MIP_INTERPOLATION (mip_filter) asks for blending between levels. Treat
@@ -407,18 +456,30 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
         }
         magFilter = filter == BRT_LINEAR ? GL_LINEAR : GL_NEAREST;
 
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (GLint)minFilter);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (GLint)magFilter);
+        /* (the filtering is the texture's own state: set when it changes) */
+        if (state->prim.colour_map == NULL || state->prim.colour_map->gl_min_filter != (GLint)minFilter
+            || state->prim.colour_map->gl_mag_filter != (GLint)magFilter || state->prim.colour_map->gl_anisotropy != maxAnisotropy) {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (GLint)minFilter);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (GLint)magFilter);
 
-        if (GLAD_GL_EXT_texture_filter_anisotropic)
-            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, maxAnisotropy);
+            if (GLAD_GL_EXT_texture_filter_anisotropic)
+                glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, maxAnisotropy);
+            if (state->prim.colour_map != NULL) {
+                state->prim.colour_map->gl_min_filter = minFilter;
+                state->prim.colour_map->gl_mag_filter = magFilter;
+                state->prim.colour_map->gl_anisotropy = maxAnisotropy;
+            }
+        }
 
         blending_on = (state->prim.flags & PRIMF_BLEND) || (state->prim.colour_map != NULL && state->prim.colour_map->blended);
         /* translucent things (water, glass, smoke) cast no shadow, and leave the normals of what is behind them */
         hVideo->shadow.skip = blending_on;
         if (hVideo->post.active && !hVideo->shadow.active) {
-            br_boolean normals = !blending_on && (state->prim.flags & PRIMF_COLOUR_WRITE);
-            glColorMaski(2, normals, normals, normals, normals);
+            int normals = !blending_on && (state->prim.flags & PRIMF_COLOUR_WRITE);
+            if (hVideo->drawState.normalsMask != normals) {
+                glColorMaski(2, normals, normals, normals, normals);
+                hVideo->drawState.normalsMask = normals;
+            }
         }
         /*
          * The glow attachment's alpha (of a post-processed view) is a mask of the mirroring surfaces, stored as
@@ -426,19 +487,19 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
          * unless they are themselves mirroring (translucent water), when they write it outright
          */
         keep_alpha = hVideo->post.active && hVideo->post.glowTex != 0 && !(blending_on && reflect > 0.0f);
-        glUniform1f(hVideo->variant->uniforms.surface_reflect, blending_on && reflect <= 0.0f ? -1.0f : reflect);
-        glUniform1i(hVideo->variant->uniforms.surface_sprite, hVideo->post.drawSprite != 0);
+        set_uniform1f(hVideo->variant->uniforms.surface_reflect, &hVideo->variant->reflect, blending_on && reflect <= 0.0f ? -1.0f : reflect);
+        set_uniform1i(hVideo->variant->uniforms.surface_sprite, &hVideo->variant->sprite, hVideo->post.drawSprite != 0);
         /* (texture_reflect -0.5: a soft edged texture, see brender.frag.glsl) */
-        glUniform1i(hVideo->variant->uniforms.surface_soft, reflect < -0.45f && reflect > -0.55f);
-        glUniform1f(hVideo->variant->uniforms.surface_wear,
+        set_uniform1i(hVideo->variant->uniforms.surface_soft, &hVideo->variant->soft, reflect < -0.45f && reflect > -0.55f);
+        set_uniform1f(hVideo->variant->uniforms.surface_wear, &hVideo->variant->wear,
                     wear_slot >= 0 && hVideo->slotWear != NULL ? hVideo->slotWear(wear_slot) : 0.0f);
         if (hVideo->post.active && hVideo->post.depthSnapshot && hVideo->post.drawSoftDistance > 0.0f) {
             glActiveTexture(GL_TEXTURE2);
             glBindTexture(GL_TEXTURE_2D, hVideo->post.aoDepthTex);
             glActiveTexture(GL_TEXTURE0);
-            glUniform1f(hVideo->variant->uniforms.soft_distance, hVideo->post.drawSoftDistance);
+            set_uniform1f(hVideo->variant->uniforms.soft_distance, &hVideo->variant->softDistance, hVideo->post.drawSoftDistance);
         } else {
-            glUniform1f(hVideo->variant->uniforms.soft_distance, 0.0f);
+            set_uniform1f(hVideo->variant->uniforms.soft_distance, &hVideo->variant->softDistance, 0.0f);
         }
         if (hVideo->sceneSurface != NULL) {
             /* it can change within a scene (off for the sky) */
@@ -453,21 +514,18 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
                 memcpy(hVideo->variant->surfaceUploaded, surface, sizeof(surface));
             }
         }
-        glUniform1i(hVideo->variant->uniforms.alpha_to_coverage, hVideo->sampleBuffers != 0);
+        set_uniform1i(hVideo->variant->uniforms.alpha_to_coverage, &hVideo->variant->alphaToCoverage, hVideo->sampleBuffers != 0);
         if (blending_on) {
-            glEnable(GL_BLEND);
+            set_cap(GL_BLEND, &hVideo->drawState.blend, 1);
             model->alpha = state->prim.alpha_val / 255.0f;
-            apply_blend_mode(state, keep_alpha);
-            glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+            apply_blend_mode(hVideo, state, keep_alpha);
+            set_cap(GL_SAMPLE_ALPHA_TO_COVERAGE, &hVideo->drawState.alphaToCoverage, 0);
         } else {
-            glDisable(GL_BLEND);
+            set_cap(GL_BLEND, &hVideo->drawState.blend, 0);
             /* Opaque: output alpha is only used as colour-key coverage (see brender.frag.glsl): none without the key */
             model->alpha = 1.0f;
-            if (hVideo->sampleBuffers && hVideo->variant != &hVideo->variants[BRENDER_OPAQUE]) {
-                glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
-            } else {
-                glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
-            }
+            set_cap(GL_SAMPLE_ALPHA_TO_COVERAGE, &hVideo->drawState.alphaToCoverage,
+                hVideo->sampleBuffers && hVideo->variant != &hVideo->variants[BRENDER_OPAQUE]);
         }
 
         model->fog_enabled = state->prim.fog_enabled;
@@ -479,7 +537,10 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
     if ((states & MASK_STATE_PRIMITIVE) && reflect < -0.45f && reflect > -0.55f) {
         /* the soft edged textures (smoke) don't write depth: the post-processing would take them for the surface
          * there (and leave out the shadows behind them) */
-        glDepthMask(GL_FALSE);
+        if (hVideo->drawState.depthMask != 0) {
+            glDepthMask(GL_FALSE);
+            hVideo->drawState.depthMask = 0;
+        }
     }
     GL_CHECK_ERROR();
 }

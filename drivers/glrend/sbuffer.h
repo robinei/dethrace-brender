@@ -71,6 +71,8 @@ typedef struct br_buffer_stored {
     int wear_slot; /* see texture_slot, -1 for none */
 
     br_boolean opaque; /* has no colour key (black) texels, so nothing is cut out of it (FALSE until known) */
+    GLint gl_min_filter, gl_mag_filter; /* the filtering last set on it (0 for not yet) */
+    GLfloat gl_anisotropy;
 
     br_boolean paletted_source_dirty;
     br_uint_32 palette_revision;
