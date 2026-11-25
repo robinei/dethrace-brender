@@ -34,7 +34,7 @@
 enum {
     U_COLOUR, U_DEPTH, U_GLOW, U_AO, U_VIEW, U_PROJ, U_NEAR, U_FAR, U_TIME, U_SCALE, U_START, U_END, U_MAX_RADIUS,
     U_GLOW_STRENGTH, U_FLARE_STRENGTH, U_AO_STRENGTH, U_SPEED, U_SHIMMER_COUNT, U_SHIMMERS, U_GRADE, U_AO_DEPTH,
-    U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN, U_SHADOW_MAP, U_SHADOW_PROJ, U_SHADOW_VIEW, U_SHADOW_TEXEL, U_SUN_SHADING, U_NORMAL, U_SPECULAR, U_SUN_DIR, U_STAGE, U_LAMPS, U_LAMP_COUNT, U_RAIN, U_SUN_HALF, U_SUN_HALF_ON, U_WET_HALF, U_WET_HALF_ON,
+    U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN, U_SHADOW_MAP, U_SHADOW_PROJ, U_SHADOW_VIEW, U_SHADOW_TEXEL, U_SUN_SHADING, U_NORMAL, U_SPECULAR, U_SUN_DIR, U_STAGE, U_LAMPS, U_LAMP_COUNT, U_RAIN, U_SUN_HALF, U_SUN_HALF_ON, U_WET_HALF, U_WET_HALF_ON, U_DOF_HALF,
     U_COUNT
 };
 /* (they must fit hVideo->post.uniforms) */
@@ -42,7 +42,7 @@ typedef char post_uniforms_fit[U_COUNT <= 64 ? 1 : -1];
 static const char* uniform_names[U_COUNT] = {
     "uColour", "uDepth", "uGlow", "uAO", "uView", "uProj", "uNear", "uFar", "uTime", "uScale", "uStart", "uEnd",
     "uMaxRadius", "uGlowStrength", "uFlareStrength", "uAOStrength", "uSpeed", "uShimmerCount", "uShimmers", "uGrade", "uAODepth",
-    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun", "uShadowMap", "uShadowProj", "uShadowView", "uShadowTexel", "uSunShading", "uNormal", "uSpecular", "uSunDir", "uStage", "uLamps", "uLampCount", "uRain", "uSunHalf", "uSunHalfOn", "uWetHalf", "uWetHalfOn"
+    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun", "uShadowMap", "uShadowProj", "uShadowView", "uShadowTexel", "uSunShading", "uNormal", "uSpecular", "uSunDir", "uStage", "uLamps", "uLampCount", "uRain", "uSunHalf", "uSunHalfOn", "uWetHalf", "uWetHalfOn", "uDofHalf"
 };
 enum {
     W_TO_WORLD, W_VIEW, W_PROJ, W_SIZE, W_TIME, W_SCALE, W_RAIN, W_BOX, W_DEPTH, W_NEAR, W_FAR, W_BRIGHTNESS, W_AMOUNT,
@@ -84,6 +84,9 @@ static void delete_targets(HVIDEO hVideo) {
     glDeleteFramebuffers(1, &hVideo->post.wetFbo);
     glDeleteTextures(1, &hVideo->post.wetTex);
     hVideo->post.wetFbo = hVideo->post.wetTex = 0;
+    glDeleteFramebuffers(1, &hVideo->post.dofFbo);
+    glDeleteTextures(1, &hVideo->post.dofTex);
+    hVideo->post.dofFbo = hVideo->post.dofTex = 0;
     hVideo->post.aoDepthFbo = hVideo->post.aoDepthTex = 0;
     hVideo->post.msaaFbo = hVideo->post.msaaColour = hVideo->post.msaaGlow = hVideo->post.msaaDepth = 0;
     hVideo->post.resolveFbo = hVideo->post.colourTex = hVideo->post.glowTex = hVideo->post.depthTex = 0;
@@ -620,6 +623,28 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
         glBindTexture(GL_TEXTURE_2D, hVideo->post.litTex);
         glGenerateMipmap(GL_TEXTURE_2D);
         /* (the depth for the depth of field: unit 1 still) */
+        if (params->dof_max_radius > 0.0f) {
+            /* the depth of field's blur, at half resolution, into dofTex (see dofHalf) */
+            if (hVideo->post.dofTex == 0) {
+                hVideo->post.dofTex = create_texture(GL_RGBA16F, (w + 1) / 2, (h + 1) / 2, GL_RGBA, GL_HALF_FLOAT, GL_NEAREST, 0);
+                glGenFramebuffers(1, &hVideo->post.dofFbo);
+                glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.dofFbo);
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, hVideo->post.dofTex, 0);
+                if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+                    BR_FATAL0("GLREND: post-processing depth of field framebuffer incomplete");
+                }
+            }
+            glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.dofFbo);
+            glViewport(0, 0, (w + 1) / 2, (h + 1) / 2);
+            glUniform1i(u[U_STAGE], 5);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, w, h);
+            glActiveTexture(GL_TEXTURE11);
+            glBindTexture(GL_TEXTURE_2D, hVideo->post.dofTex);
+            glActiveTexture(GL_TEXTURE0);
+            glUniform1i(u[U_DOF_HALF], 11);
+        }
         glUniform1i(u[U_STAGE], 2);
         glDrawArrays(GL_TRIANGLES, 0, 3);
     } else {
@@ -629,6 +654,8 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     }
 
     glBindVertexArray(0);
+    glActiveTexture(GL_TEXTURE11);
+    glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE10);
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE9);

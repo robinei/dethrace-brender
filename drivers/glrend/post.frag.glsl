@@ -19,6 +19,8 @@ uniform bool uSunHalfOn;
 // the wet ground's reflections at half resolution (stage 4 draws them), and whether there are (see wetGroundAt)
 uniform sampler2D uWetHalf;
 uniform bool uWetHalfOn;
+// the depth of field's blur, half resolution (stage 5): colour, and in alpha the blur's radius / uMaxRadius
+uniform sampler2D uDofHalf;
 // lamps (street lamps, neon, signs) the air glows around at night: view space position and the reach of the glow,
 // colour and strength
 uniform vec4 uLamps[48];
@@ -80,7 +82,7 @@ uniform sampler2D uNormal;
 
 out vec4 fragColour;
 
-const int TAPS = 96;
+const int TAPS = 32;
 const float GOLDEN_ANGLE = 2.39996323;
 
 float linearDepth(float d) {
@@ -104,6 +106,39 @@ float blurRadius(vec2 q) {
     return blur(q) * uMaxRadius;
 }
 
+// The blur at window pixel p (of the lit scene, uColour, mipmapped), and its radius: for every other pixel,
+// at half resolution (stage 5, see dofAt). Its taps are of the lit scene's half resolution mip level
+vec4 dofHalf(vec2 p, vec2 size) {
+    float radius = blurRadius(p);
+    if (radius < 0.5) {
+        return vec4(textureLod(uColour, p / size, 1.0).rgb, 0.0);
+    }
+    bool background = texelFetch(uDepth, ivec2(p), 0).r >= 1.0;
+    float turn = 6.2831853 * fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+    // (a quarter of the taps a full resolution pixel would need for the area: each covers four pixels.) The
+    // background (sky) is the most blurred but smooth: fewer taps, from a smaller mip of the lit scene
+    int taps = background ? 12 : clamp(int(radius * radius * 0.4) + 6, 8, TAPS);
+    float lod = background ? max(1.0, log2(radius / 4.0)) : 1.0;
+    float own = 4.0 / max(radius * radius, 4.0);
+    vec3 sum = textureLod(uColour, p / size, 1.0).rgb * own;
+    float weight = own;
+    for (int i = 0; i < taps; i++) {
+        float r = sqrt((float(i) + 0.5) / float(taps)) * radius;
+        float a = float(i) * GOLDEN_ANGLE + turn;
+        vec2 q = p + r * vec2(cos(a), sin(a));
+        float qr = blurRadius(q);
+        // only samples blurred enough to reach this pixel: sharp nearer things don't bleed out
+        float w = clamp(qr - r + 2.0, 0.0, 1.0) / max(qr * qr, 4.0);
+        sum += textureLod(uColour, q / size, lod).rgb * w;
+        weight += w;
+    }
+    return vec4(sum / weight, radius / max(uMaxRadius, 0.0001));
+}
+
+// Depth of field, of the far distance only (nothing nearer is blurred, so nothing blurs over what is sharp): a
+// gather of the samples around whose blur reaches the pixel, each spread over its blur's area (as a scatter
+// would), on a spiral turned per pixel; made at half resolution (dofHalf), and here taken from the four half
+// resolution pixels around with radii like this one's, the sharp scene blended into it as the radius shrinks
 vec3 dof(vec2 p, vec2 size) {
     vec3 centre = texelFetch(uColour, ivec2(p), 0).rgb;
     if (uMaxRadius <= 0.0) {
@@ -113,25 +148,25 @@ vec3 dof(vec2 p, vec2 size) {
     if (radius < 0.5) {
         return centre;
     }
-    bool background = texelFetch(uDepth, ivec2(p), 0).r >= 1.0;
-    float turn = 6.2831853 * fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
-    // the background (sky) is the most blurred but smooth: fewer taps, from a smaller mip of the lit scene
-    int taps = background ? 24 : clamp(int(radius * radius * 1.6) + 8, 12, TAPS);
-    float lod = background ? max(0.0, log2(radius / 4.0)) : 0.0;
-    float own = 1.0 / max(radius * radius, 1.0);
-    vec3 sum = centre * own;
-    float weight = own;
-    for (int i = 0; i < taps; i++) {
-        float r = sqrt((float(i) + 0.5) / float(taps)) * radius;
-        float a = float(i) * GOLDEN_ANGLE + turn;
-        vec2 q = p + r * vec2(cos(a), sin(a));
-        float qr = blurRadius(q);
-        // only samples blurred enough to reach this pixel: sharp nearer things don't bleed out
-        float w = clamp(qr - r + 1.0, 0.0, 1.0) / max(qr * qr, 1.0);
-        sum += textureLod(uColour, q / size, lod).rgb * w;
-        weight += w;
+    vec2 h = p * 0.5 - 0.5;
+    vec2 f = fract(h);
+    ivec2 base = ivec2(floor(h));
+    ivec2 last = textureSize(uDofHalf, 0) - 1;
+    vec3 sum = vec3(0.0);
+    float weight = 0.0;
+    for (int y = 0; y <= 1; y++) {
+        for (int x = 0; x <= 1; x++) {
+            vec4 b = texelFetch(uDofHalf, clamp(base + ivec2(x, y), ivec2(0), last), 0);
+            float w = (x == 1 ? f.x : 1.0 - f.x) * (y == 1 ? f.y : 1.0 - f.y) + 0.001;
+            w *= max(0.0, 1.0 - abs(b.a * uMaxRadius - radius) / max(0.5 * radius, 1.0));
+            sum += b.rgb * w;
+            weight += w;
+        }
     }
-    return sum / weight;
+    if (weight < 0.0001) {
+        return centre;
+    }
+    return mix(centre, sum / weight, smoothstep(0.5, 2.0, radius));
 }
 
 vec3 bloom(vec2 uv) {
@@ -931,6 +966,11 @@ void main() {
     if (uStage == 3) {
         // (every other pixel's, see sunMapsAt)
         fragColour = vec4(sunMaps(floor(p) * 2.0 + 1.0));
+        return;
+    }
+    if (uStage == 5) {
+        // (every other pixel's, see dofHalf)
+        fragColour = dofHalf(floor(p) * 2.0 + 1.0, size);
         return;
     }
     if (uStage == 4) {
