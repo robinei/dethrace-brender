@@ -25,6 +25,7 @@
 #include "post.frag.glsl.h"
 #include "ssao.frag.glsl.h"
 #include <stdio.h>
+#include <string.h>
 #include "weather.vert.glsl.h"
 #include "weather.frag.glsl.h"
 
@@ -833,7 +834,40 @@ void BR_PUBLIC_ENTRY BrGLPostProcessSoftParticles(br_pixelmap* screen, float dis
     }
 }
 
-br_error BR_PUBLIC_ENTRY BrGLShadowPassBegin(br_pixelmap* screen, int size, int level) {
+/* A shadow map's depth texture and framebuffer, size x size (made again at another size); 0 if it can't be */
+static int shadow_target(GLuint* fbo, GLuint* tex, int* current, int size) {
+    if (*fbo != 0 && *current == size) {
+        return 1;
+    }
+    if (*fbo != 0) {
+        glDeleteFramebuffers(1, fbo);
+        glDeleteTextures(1, tex);
+    }
+    /* (its depths are read and compared in the post pass, which filters them itself) */
+    *tex = create_texture(GL_DEPTH_COMPONENT24, size, size, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, GL_NEAREST, 0);
+    glBindTexture(GL_TEXTURE_2D, *tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glGenFramebuffers(1, fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, *fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, *tex, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glDeleteFramebuffers(1, fbo);
+        glDeleteTextures(1, tex);
+        *fbo = *tex = 0;
+        *current = 0;
+        return 0;
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    *current = size;
+    return 1;
+}
+
+br_error BR_PUBLIC_ENTRY BrGLShadowPassBegin(br_pixelmap* screen, int size, int level, int cache) {
     br_device_pixelmap* self = (br_device_pixelmap*)screen;
     HVIDEO hVideo;
     GLint max_size;
@@ -846,49 +880,59 @@ br_error BR_PUBLIC_ENTRY BrGLShadowPassBegin(br_pixelmap* screen, int size, int 
     if (size > max_size) {
         size = max_size;
     }
-    if (hVideo->shadow.fbo[level] == 0 || hVideo->shadow.size[level] != size) {
-        if (hVideo->shadow.fbo[level] != 0) {
-            glDeleteFramebuffers(1, &hVideo->shadow.fbo[level]);
-            glDeleteTextures(1, &hVideo->shadow.tex[level]);
-        }
-        /* (its depths are read and compared in the post pass, which filters them itself) */
-        hVideo->shadow.tex[level] = create_texture(GL_DEPTH_COMPONENT24, size, size, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, GL_NEAREST, 0);
-        glBindTexture(GL_TEXTURE_2D, hVideo->shadow.tex[level]);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glGenFramebuffers(1, &hVideo->shadow.fbo[level]);
-        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->shadow.fbo[level]);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, hVideo->shadow.tex[level], 0);
-        glDrawBuffer(GL_NONE);
-        glReadBuffer(GL_NONE);
-        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            glDeleteFramebuffers(1, &hVideo->shadow.fbo[level]);
-            glDeleteTextures(1, &hVideo->shadow.tex[level]);
-            hVideo->shadow.fbo[level] = hVideo->shadow.tex[level] = 0;
+    if (cache == BR_GL_SHADOW_CACHE) {
+        hVideo->shadow.cacheValid[level] = 0;
+        if (!shadow_target(&hVideo->shadow.cacheFbo[level], &hVideo->shadow.cacheTex[level], &hVideo->shadow.cacheSize[level], size)) {
             return BRE_FAIL;
         }
-        hVideo->shadow.size[level] = size;
+        hVideo->shadow.drawFbo = hVideo->shadow.cacheFbo[level];
+    } else {
+        if (cache == BR_GL_SHADOW_FROM_CACHE && (!hVideo->shadow.cacheValid[level] || hVideo->shadow.cacheSize[level] != size)) {
+            return BRE_FAIL;
+        }
+        if (!shadow_target(&hVideo->shadow.fbo[level], &hVideo->shadow.tex[level], &hVideo->shadow.size[level], size)) {
+            return BRE_FAIL;
+        }
+        hVideo->shadow.drawFbo = hVideo->shadow.fbo[level];
     }
-    glBindFramebuffer(GL_FRAMEBUFFER, hVideo->shadow.fbo[level]);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, hVideo->shadow.drawFbo);
     glDepthMask(GL_TRUE);
-    glClear(GL_DEPTH_BUFFER_BIT);
+    if (cache == BR_GL_SHADOW_FROM_CACHE) {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, hVideo->shadow.cacheFbo[level]);
+        glBlitFramebuffer(0, 0, size, size, 0, 0, size, size, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+        memcpy(hVideo->shadow.proj[level], hVideo->shadow.cacheProj[level], sizeof(hVideo->shadow.proj[level]));
+        hVideo->shadow.valid[level] = 1;
+    } else {
+        glClear(GL_DEPTH_BUFFER_BIT);
+        hVideo->shadow.valid[level] = 0;
+    }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    hVideo->shadow.drawSize = size;
+    hVideo->shadow.drawingCache = cache == BR_GL_SHADOW_CACHE;
     hVideo->shadow.active = 1;
     hVideo->shadow.level = level;
-    hVideo->shadow.valid[level] = 0;
     GL_CHECK_ERROR();
     return BRE_OK;
 }
 
 void BR_PUBLIC_ENTRY BrGLShadowPassEnd(br_pixelmap* screen) {
     br_device_pixelmap* self = (br_device_pixelmap*)screen;
+    HVIDEO hVideo;
+    int level;
 
     if (self == NULL || self->screen != self) {
         return;
     }
-    self->asFront.video.shadow.active = 0;
+    hVideo = &self->asFront.video;
+    level = hVideo->shadow.level;
+    if (hVideo->shadow.active && hVideo->shadow.drawingCache) {
+        /* (what was drawn went to the cache, the map itself is still to be drawn) */
+        memcpy(hVideo->shadow.cacheProj[level], hVideo->shadow.proj[level], sizeof(hVideo->shadow.proj[level]));
+        hVideo->shadow.cacheValid[level] = hVideo->shadow.valid[level];
+        hVideo->shadow.valid[level] = 0;
+        hVideo->shadow.drawingCache = 0;
+    }
+    hVideo->shadow.active = 0;
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 

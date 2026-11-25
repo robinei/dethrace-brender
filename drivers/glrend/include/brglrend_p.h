@@ -52,8 +52,14 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap *screen, const br_gl_post_pa
 /* The sun's shadow maps (up to 3 levels, cascaded: each covers more than the one before): the scenes drawn
  * between Begin and End (with a parallel camera at the sun) only write the depth of that level's map, size x
  * size; translucent draws are left out. The post-processing then shades by them (see
- * br_gl_post_params.shadow_view), the first level that covers a point taking precedence */
-br_error BR_PUBLIC_ENTRY BrGLShadowPassBegin(br_pixelmap *screen, int size, int level);
+ * br_gl_post_params.shadow_view), the first level that covers a point taking precedence.
+ * cache: BR_GL_SHADOW_DRAW clears the map; BR_GL_SHADOW_CACHE draws into the level's cache instead (what doesn't
+ * move); BR_GL_SHADOW_FROM_CACHE starts the map as a copy of the cache, which must have been drawn at this size
+ * with the same camera (fails otherwise), to draw what moves on top */
+#define BR_GL_SHADOW_DRAW 0
+#define BR_GL_SHADOW_CACHE 1
+#define BR_GL_SHADOW_FROM_CACHE 2
+br_error BR_PUBLIC_ENTRY BrGLShadowPassBegin(br_pixelmap *screen, int size, int level, int cache);
 /* What is drawn while on is sprites (flat cards facing the camera), which the sun shadows treat as such */
 void BR_PUBLIC_ENTRY BrGLSprites(br_pixelmap *screen, int on);
 void BR_PUBLIC_ENTRY BrGLShadowPassEnd(br_pixelmap *screen);

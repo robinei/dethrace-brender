@@ -196,6 +196,14 @@ typedef struct _VIDEO {
         GLuint fbo[3], tex[3];
         float proj[3][16]; /* the projections they were drawn with (GL) */
         int skip; /* the group being drawn doesn't cast a shadow (translucent) */
+        /* the levels' caches (see BrGLShadowPassBegin), and whether one is being drawn */
+        int drawingCache;
+        int cacheValid[3];
+        int cacheSize[3];
+        GLuint cacheFbo[3], cacheTex[3];
+        float cacheProj[3][16];
+        GLuint drawFbo; /* what is drawn to while active, and its size */
+        int drawSize;
     } shadow;
 
     /* Post-processing of a view (see post.c): rendered offscreen between BrGLPostProcessBegin/End */
