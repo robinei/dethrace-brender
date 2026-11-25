@@ -587,7 +587,6 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, vec2 dz, float gap) {
     float texels = 1.0 / uShadowTexel[level];
     // (a texel in world units: the map's width, 2 / its projection's x scale, over its texels)
     float texel = 2.0 / uShadowProj[level][0][0] * uShadowTexel[level];
-    int last = int(texels) - 1;
     // the surface may bend away from its plane (up to about 22 degrees) where two faces of the ground meet: more
     // depth allowed the further a sample is, so the face beyond a fold isn't taken for a caster
     float bend = 0.4 * texel * depth_per_unit;
@@ -598,14 +597,15 @@ float shadowed(int level, vec3 m, vec2 ax, vec2 ay, vec2 dz, float gap) {
     float search = clamp(20.0 * 0.0093 / texel, 1.5, 16.0);
     float blocker = 0.0;
     float blockers = 0.0;
-    for (int j = 0; j < 6; j++) {
-        for (int i = 0; i < 6; i++) {
-            vec2 o = (vec2(float(i), float(j)) / 5.0 - 0.5) * 2.0 * search;
-            float d = shadowDepth(level, clamp(ivec2(floor(f + o + 0.5)), ivec2(0), ivec2(last)));
-            if (d < threshold + dot(dz, o) - bend * length(o)) {
-                blocker += d - dot(dz, o);
-                blockers += 1.0;
-            }
+    // (3x3 places, each 2x2 texels in one read)
+    for (int j = 0; j < 3; j++) {
+        for (int i = 0; i < 3; i++) {
+            vec2 o = (vec2(float(i), float(j)) / 2.0 - 0.5) * 2.0 * search;
+            vec4 d = shadowDepths(level, ivec2(floor(f + o)));
+            vec4 found = vec4(lessThan(d, vec4(threshold + dot(dz, o) - bend * length(o))));
+            float n = dot(found, vec4(1.0));
+            blocker += dot(found, d) - dot(dz, o) * n;
+            blockers += n;
         }
     }
     if (blockers == 0.0) {
