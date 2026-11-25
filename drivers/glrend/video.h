@@ -47,6 +47,7 @@ typedef struct _VIDEO {
     br_int_32 textureSharp; /* Sample unfiltered textures with anti-aliased texel edges */
     br_int_32 textureUpscaler; /* 2x magnification of paletted textures: 0 = none, 1 = MMPX, 2 = xBR */
     br_int_32 fogDistance;     /* Fog by distance, from fog_min to fully fogged at fog_max */
+    br_int_32 msaaSamples;     /* The post-processed scene's multisampling (callbacks' msaa_samples) */
     br_device_gl_textureglow_cbfn* textureGlow;
     br_device_gl_glowscale_cbfn* glowScale;
     br_device_gl_scenelighting_cbfn* sceneLighting;
@@ -133,6 +134,7 @@ typedef struct _VIDEO {
     int sceneClipPlanes; /* the scene being drawn has clip planes (only BRENDER_FULL clips) */
 
     GLint sampleBuffers; /* Non-zero if the default framebuffer is multisampled */
+    int sceneMultisampled; /* the scene being drawn is (the post-processing's target, or the window): sceneBegin */
 
     /* The sun's shadow map (see BrGLShadowPassBegin): the scenes drawn while active only write its depth */
     struct {

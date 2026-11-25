@@ -311,11 +311,16 @@ br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap* screen, br_boolean gl
     glow = glow ? 1 : 0;
     if (width != hVideo->post.width || height != hVideo->post.height || hVideo->post.resolveFbo == 0
         || glow != (hVideo->post.glowTex != 0)) {
-        /* match the window's multisampling */
+        /* the window's multisampling, if it has any (else the one asked for: see msaaSamples) */
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        samples = 0;
+        samples = hVideo->msaaSamples;
         if (hVideo->sampleBuffers) {
             glGetIntegerv(GL_SAMPLES, &samples);
+        }
+        if (samples > 0) {
+            GLint max_samples = 0;
+            glGetIntegerv(GL_MAX_SAMPLES, &max_samples);
+            samples = samples < max_samples ? samples : max_samples;
         }
         if (create_targets(hVideo, width, height, samples, glow) != BRE_OK) {
             return BRE_FAIL;

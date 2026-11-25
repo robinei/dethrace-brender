@@ -514,7 +514,7 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
                 memcpy(hVideo->variant->surfaceUploaded, surface, sizeof(surface));
             }
         }
-        set_uniform1i(hVideo->variant->uniforms.alpha_to_coverage, &hVideo->variant->alphaToCoverage, hVideo->sampleBuffers != 0);
+        set_uniform1i(hVideo->variant->uniforms.alpha_to_coverage, &hVideo->variant->alphaToCoverage, hVideo->sceneMultisampled);
         if (blending_on) {
             set_cap(GL_BLEND, &hVideo->drawState.blend, 1);
             model->alpha = state->prim.alpha_val / 255.0f;
@@ -525,7 +525,7 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
             /* Opaque: output alpha is only used as colour-key coverage (see brender.frag.glsl): none without the key */
             model->alpha = 1.0f;
             set_cap(GL_SAMPLE_ALPHA_TO_COVERAGE, &hVideo->drawState.alphaToCoverage,
-                hVideo->sampleBuffers && hVideo->variant != &hVideo->variants[BRENDER_OPAQUE]);
+                hVideo->sceneMultisampled && hVideo->variant != &hVideo->variants[BRENDER_OPAQUE]);
         }
 
         model->fog_enabled = state->prim.fog_enabled;

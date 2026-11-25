@@ -137,6 +137,8 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
         const int* which = hVideo->shadow.active ? shadow_variants : scene_variants;
         int n = 2;
 
+        hVideo->sceneMultisampled = hVideo->shadow.active ? 0
+            : hVideo->post.active ? hVideo->post.samples > 0 : hVideo->sampleBuffers != 0;
         if (count > BR_GL_MAX_SCENE_LIGHTS) {
             count = BR_GL_MAX_SCENE_LIGHTS;
         }
@@ -165,12 +167,12 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
             glUniform4fv(u->surface_haze, 2, &surface[8]);
             memcpy(hVideo->variant->surfaceUploaded, surface, sizeof(surface));
             glUniform1f(u->glow_intensity, 0.0f);
-            glUniform1i(u->alpha_to_coverage, hVideo->sampleBuffers != 0);
+            glUniform1i(u->alpha_to_coverage, hVideo->sceneMultisampled);
             glUniform1i(u->fog_distance, hVideo->fogDistance != 0);
             /* (the per draw ones: not known) */
             hVideo->variant->glowIntensity = hVideo->variant->reflect = hVideo->variant->wear = hVideo->variant->softDistance = -2.0f;
             hVideo->variant->sharp = hVideo->variant->sprite = hVideo->variant->soft = -1;
-            hVideo->variant->alphaToCoverage = hVideo->sampleBuffers != 0;
+            hVideo->variant->alphaToCoverage = hVideo->sceneMultisampled;
         }
     }
     if (hVideo->post.active) {
