@@ -3,6 +3,8 @@
 #include "brassert.h"
 #include "brender.frag.glsl.h"
 #include "brender.vert.glsl.h"
+#include "noise.frag.glsl.h"
+#include "post.vert.glsl.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -16,6 +18,7 @@ static void get_uniforms(GLuint program, brender_uniforms* u) {
     u->glow_intensity = glGetUniformLocation(program, "glow_intensity");
     u->surface_reflect = glGetUniformLocation(program, "surface_reflect");
     u->soft_depth = glGetUniformLocation(program, "soft_depth");
+    u->noise_texture = glGetUniformLocation(program, "noise_texture");
     u->soft_distance = glGetUniformLocation(program, "soft_distance");
     u->surface_wear = glGetUniformLocation(program, "surface_wear");
     u->surface_sprite = glGetUniformLocation(program, "surface_sprite");
@@ -131,6 +134,7 @@ static void scene_uniforms(HVIDEO hVideo) {
     glUniform1i(u->main_texture, hVideo->brenderProgram.mainTextureBinding);
     glUniform1i(u->glow_texture, 1);
     glUniform1i(u->soft_depth, 2);
+    glUniform1i(u->noise_texture, 7);
     glUniform1f(u->scene_brightness, hVideo->sceneBrightness);
     glUniform1i(u->num_spots, hVideo->sceneLightCount);
     /* (each draw gives those of them that reach it, see StoredGLRenderGroup) */
@@ -395,6 +399,62 @@ void VIDEOI_BuildListedPrograms(HVIDEO hVideo, GLuint vao) {
     GL_CHECK_ERROR();
 }
 
+/*
+ * The value noise's lattice (see valueNoise in brender.frag.glsl): a 128^3 half-float texture (4 MB) of the hash
+ * at each integer point. It repeats every 128 points: the surface variation's coarse octave (0.6 per unit) every
+ * 213 units, about 1.5 km. Drawn by noise.frag.glsl, a layer at a time, with the hash the shader computed itself
+ * before
+ */
+#define NOISE_SIZE 128
+static void make_noise_texture(HVIDEO hVideo) {
+    GLuint vert, frag, program, fbo, vao;
+    GLint layer;
+    GLint viewport[4];
+    int z;
+
+    vert = VIDEOI_CreateAndCompileShader("post.vert", GL_VERTEX_SHADER, POST_VERT_GLSL, sizeof(POST_VERT_GLSL));
+    frag = VIDEOI_CreateAndCompileShader("noise.frag", GL_FRAGMENT_SHADER, NOISE_FRAG_GLSL, sizeof(NOISE_FRAG_GLSL));
+    if (!vert || !frag || !(program = VIDEOI_CreateAndCompileProgram(vert, frag))) {
+        BR_FATAL0("GLREND: no program for the noise texture");
+        return;
+    }
+    glDeleteShader(vert);
+    glDeleteShader(frag);
+    glGenTextures(1, &hVideo->noiseTexture);
+    glBindTexture(GL_TEXTURE_3D, hVideo->noiseTexture);
+    glTexImage3D(GL_TEXTURE_3D, 0, GL_R16F, NOISE_SIZE, NOISE_SIZE, NOISE_SIZE, 0, GL_RED, GL_HALF_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
+    glBindTexture(GL_TEXTURE_3D, 0);
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    glGenFramebuffers(1, &fbo);
+    glGenVertexArrays(1, &vao);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glBindVertexArray(vao);
+    glUseProgram(program);
+    layer = glGetUniformLocation(program, "uLayer");
+    glViewport(0, 0, NOISE_SIZE, NOISE_SIZE);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST);
+    for (z = 0; z < NOISE_SIZE; z++) {
+        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, hVideo->noiseTexture, 0, z);
+        glUniform1i(layer, z);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+    }
+    glBindVertexArray(0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteVertexArrays(1, &vao);
+    glDeleteFramebuffers(1, &fbo);
+    glUseProgram(0);
+    glDeleteProgram(program);
+    glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+    GL_CHECK_ERROR();
+}
+
 br_boolean VIDEOI_CompileBRenderShader(HVIDEO hVideo, const char* vertPath, const char* fragPath) {
     GLuint vert, frag;
 
@@ -466,6 +526,7 @@ br_boolean VIDEOI_CompileBRenderShader(HVIDEO hVideo, const char* vertPath, cons
 
         VIDEOI_GetShaderVariables(hVideo);
         hVideo->variant = &hVideo->variants[BRENDER_FULL];
+        make_noise_texture(hVideo);
 
         /* (without them the full program draws it all, the same) */
         hVideo->variants[BRENDER_OPAQUE].program = compile_variant(hVideo, "brender (opaque)", "#define OPAQUE\n",

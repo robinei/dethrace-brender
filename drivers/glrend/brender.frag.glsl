@@ -244,20 +244,17 @@ uniform vec4 surface_sun;
 uniform vec4 surface_up;  // the world's up in view space
 uniform vec4 surface_haze[2]; // haze colour, most of it; the distance most of it is reached by, relief strength, night (the haze replaces the darkness)
 
-float hash3(vec3 p) {
-    p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
-    p *= 17.0;
-    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
-}
+// Smooth value noise: random values at the integer points (a hash of them), blended between them with a smooth
+// curve. The values come from a texture of them (noise.frag.glsl, made at start: see make_noise_texture in
+// shader_brender.c), which repeats every NOISE_SIZE points; read where its linear filtering blends them by the curve
+#define NOISE_SIZE 128.0
+uniform sampler3D noise_texture;
 
 float valueNoise(vec3 x) {
     vec3 i = floor(x);
     vec3 f = fract(x);
     f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(mix(hash3(i), hash3(i + vec3(1.0, 0.0, 0.0)), f.x),
-                   mix(hash3(i + vec3(0.0, 1.0, 0.0)), hash3(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
-               mix(mix(hash3(i + vec3(0.0, 0.0, 1.0)), hash3(i + vec3(1.0, 0.0, 1.0)), f.x),
-                   mix(hash3(i + vec3(0.0, 1.0, 1.0)), hash3(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);
+    return texture(noise_texture, (i + f + 0.5) / NOISE_SIZE).r;
 }
 
 // Relief: the texture's brightness taken as height (bright is raised), how much brighter or darker the sun makes

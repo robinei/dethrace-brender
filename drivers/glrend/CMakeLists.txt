@@ -37,6 +37,11 @@ add_custom_command(
         DEPENDS ssao.frag.glsl
 )
 add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/noise.frag.glsl.h"
+        COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DFILE=noise.frag.glsl" -P "${BRender_SOURCE_DIR}/cmake/EmbedResource.cmake"
+        DEPENDS noise.frag.glsl
+)
+add_custom_command(
         OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/weather.vert.glsl.h"
         COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DFILE=weather.vert.glsl" -P "${BRender_SOURCE_DIR}/cmake/EmbedResource.cmake"
         DEPENDS weather.vert.glsl
@@ -175,6 +180,7 @@ add_library(glrend
         "${CMAKE_CURRENT_BINARY_DIR}/post.vert.glsl.h"
         "${CMAKE_CURRENT_BINARY_DIR}/post.frag.glsl.h"
         "${CMAKE_CURRENT_BINARY_DIR}/ssao.frag.glsl.h"
+        "${CMAKE_CURRENT_BINARY_DIR}/noise.frag.glsl.h"
         "${CMAKE_CURRENT_BINARY_DIR}/weather.vert.glsl.h"
         "${CMAKE_CURRENT_BINARY_DIR}/weather.frag.glsl.h"
         )

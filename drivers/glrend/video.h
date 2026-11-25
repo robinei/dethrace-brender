@@ -21,6 +21,7 @@ typedef struct brender_uniforms {
     GLint glow_intensity;    /* float */
     GLint surface_reflect;   /* float */
     GLint soft_depth;        /* sampler2D */
+    GLint noise_texture;     /* sampler3D */
     GLint soft_distance;     /* float */
     GLint surface_wear;      /* float */
     GLint surface_sprite;    /* bool */
@@ -156,6 +157,7 @@ typedef struct _VIDEO {
      * (0 for one that didn't build: BRENDER_FULL instead, BRENDER_SHADOW for BRENDER_SHADOW_OPAQUE)
      */
     brender_variant variants[BRENDER_VARIANTS], *variant; /* (the one in use) */
+    GLuint noiseTexture; /* the value noise's lattice, see make_noise_texture in shader_brender.c */
     /*
      * The BRENDER_FULL and BRENDER_OPAQUE draws' programs built for their features: the code of those they don't
      * need left out (see VIDEOI_UseBRenderFeatures)

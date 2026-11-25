@@ -126,6 +126,10 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
 
     /* Bind the model UBO here, it's faster than doing it for each model group */
     glBindBufferBase(GL_UNIFORM_BUFFER, hVideo->brenderProgram.blockBindingModel, hVideo->brenderProgram.uboModel);
+    /* (the value noise's, see make_noise_texture) */
+    glActiveTexture(GL_TEXTURE7);
+    glBindTexture(GL_TEXTURE_3D, hVideo->noiseTexture);
+    glActiveTexture(GL_TEXTURE0);
     {
         /* the scene's uniforms: each program is given them the first time it is used in the scene (scene_uniforms) */
         float brightness = 1.0f;

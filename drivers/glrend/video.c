@@ -221,6 +221,7 @@ void VIDEO_Close(HVIDEO hVideo) {
     if (hVideo->brenderProgram.blockIndexModel != GL_INVALID_INDEX)
         glDeleteBuffers(0, &hVideo->brenderProgram.uboModel);
 
+    glDeleteTextures(1, &hVideo->noiseTexture);
     glDeleteProgram(hVideo->defaultProgram.program);
 }
 
