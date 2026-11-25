@@ -19,6 +19,7 @@ void VIDEO_Close(HVIDEO hVideo);
 
 GLuint VIDEOI_CreateAndCompileShader(const char* name, GLenum type, const char* shader, size_t size);
 GLuint VIDEOI_CreateAndCompileShaderDefines(const char* name, GLenum type, const char* shader, size_t size, const char* defines);
+char* preprocessShader(const char* shader, size_t size, const char* defines);
 
 /* post.c */
 void PostProcessRecordScene(HVIDEO hVideo, int x, int y, int w, int h, const br_matrix4* view_to_screen, br_token hint,
@@ -33,6 +34,8 @@ br_boolean VIDEOI_CompileDefaultShader(HVIDEO hVideo);
 br_boolean VIDEOI_CompileBRenderShader(HVIDEO hVideo, const char* vertPath, const char* fragPath);
 
 void VIDEOI_UseBRenderVariant(HVIDEO hVideo, int which);
+void VIDEOI_UseBRenderFeatures(HVIDEO hVideo, int base, unsigned features);
+void VIDEOI_BuildListedPrograms(HVIDEO hVideo, GLuint vao);
 
 GLuint VIDEO_BrPixelmapToGLTexture(br_pixelmap* pm);
 

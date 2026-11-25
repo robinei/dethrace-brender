@@ -268,6 +268,8 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
     br_boolean keep_alpha;
     float reflect = 0.0f;
     int wear_slot = -1;
+    int base = -1;
+    float glow = 0.0f;
 
     /* Only use the states we want (if valid). */
     states = state->valid & states;
@@ -360,7 +362,8 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
                 /* (what is blended casts no shadow, see below) */
                 VIDEOI_UseBRenderVariant(hVideo, cut || hVideo->sceneClipPlanes ? BRENDER_SHADOW : BRENDER_SHADOW_OPAQUE);
             } else {
-                VIDEOI_UseBRenderVariant(hVideo, blended || cut || hVideo->sceneClipPlanes ? BRENDER_FULL : BRENDER_OPAQUE);
+                /* (built for the draw's features: chosen below) */
+                base = blended || cut || hVideo->sceneClipPlanes ? BRENDER_FULL : BRENDER_OPAQUE;
             }
         }
 
@@ -408,10 +411,8 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
                 glActiveTexture(GL_TEXTURE1);
                 glBindTexture(GL_TEXTURE_2D, state->prim.colour_map->glow_tex);
                 glActiveTexture(GL_TEXTURE0);
-                set_uniform1f(hVideo->variant->uniforms.glow_intensity, &hVideo->variant->glowIntensity, state->prim.colour_map->glow_intensity
-                        * (hVideo->glowScale != NULL ? hVideo->glowScale(state->prim.colour_map->glow_id) : 1.0f));
-            } else {
-                set_uniform1f(hVideo->variant->uniforms.glow_intensity, &hVideo->variant->glowIntensity, 0.0f);
+                glow = state->prim.colour_map->glow_intensity
+                    * (hVideo->glowScale != NULL ? hVideo->glowScale(state->prim.colour_map->glow_id) : 1.0f);
             }
 
             // glUniform1i(hVideo->variant->uniforms.main_texture, hVideo->brenderProgram.mainTextureBinding);
@@ -422,7 +423,6 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
             // todo?
             model->disable_colour_key = 0;
             glBindTexture(GL_TEXTURE_2D, tex_default);
-            set_uniform1f(hVideo->variant->uniforms.glow_intensity, &hVideo->variant->glowIntensity, 0.0f);
             model->disable_texture = 1;
             // BrVector4Set(&model->surface_colour, 0, 1, 0, 1);
             // glBindTexture(GL_TEXTURE_2D, 27);
@@ -440,7 +440,6 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
         if (sharp) {
             filter = BRT_LINEAR;
         }
-        set_uniform1i(hVideo->variant->uniforms.sharp_filter, &hVideo->variant->sharp, sharp);
         /*
          * Materials request mipmapping through BR_MATF_MAP_ANTIALIASING (mip_map), while
          * BR_MATF_MIP_INTERPOLATION (mip_filter) asks for blending between levels. Treat
@@ -487,26 +486,46 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
          * unless they are themselves mirroring (translucent water), when they write it outright
          */
         keep_alpha = hVideo->post.active && hVideo->post.glowTex != 0 && !(blending_on && reflect > 0.0f);
-        set_uniform1f(hVideo->variant->uniforms.surface_reflect, &hVideo->variant->reflect, blending_on && reflect <= 0.0f ? -1.0f : reflect);
-        set_uniform1i(hVideo->variant->uniforms.surface_sprite, &hVideo->variant->sprite, hVideo->post.drawSprite != 0);
-        /* (texture_reflect -0.5: a soft edged texture, see brender.frag.glsl) */
-        set_uniform1i(hVideo->variant->uniforms.surface_soft, &hVideo->variant->soft, reflect < -0.45f && reflect > -0.55f);
-        set_uniform1f(hVideo->variant->uniforms.surface_wear, &hVideo->variant->wear,
-                    wear_slot >= 0 && hVideo->slotWear != NULL ? hVideo->slotWear(wear_slot) : 0.0f);
-        if (hVideo->post.active && hVideo->post.depthSnapshot && hVideo->post.drawSoftDistance > 0.0f) {
-            glActiveTexture(GL_TEXTURE2);
-            glBindTexture(GL_TEXTURE_2D, hVideo->post.aoDepthTex);
-            glActiveTexture(GL_TEXTURE0);
-            set_uniform1f(hVideo->variant->uniforms.soft_distance, &hVideo->variant->softDistance, hVideo->post.drawSoftDistance);
-        } else {
-            set_uniform1f(hVideo->variant->uniforms.soft_distance, &hVideo->variant->softDistance, 0.0f);
-        }
-        if (hVideo->sceneSurface != NULL) {
-            /* it can change within a scene (off for the sky) */
+        {
+            /* (texture_reflect -0.5: a soft edged texture, see brender.frag.glsl) */
+            int soft = reflect < -0.45f && reflect > -0.55f;
+            float wear = wear_slot >= 0 && hVideo->slotWear != NULL ? hVideo->slotWear(wear_slot) : 0.0f;
+            float soft_distance = hVideo->post.active && hVideo->post.depthSnapshot && hVideo->post.drawSoftDistance > 0.0f
+                ? hVideo->post.drawSoftDistance : 0.0f;
+            /* (it can change within a scene: off for the sky) */
             float surface[BR_GL_SCENE_SURFACE_FLOATS] = { 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
-            if (!hVideo->sceneSurface(surface)) {
+            if (hVideo->sceneSurface == NULL || !hVideo->sceneSurface(surface)) {
                 surface[3] = surface[7] = surface[11] = surface[13] = 0.0f;
             }
+            if (base >= 0) {
+                /* the program built for what this draw needs */
+                unsigned features = 0;
+                features |= hVideo->sceneBrightness < 1.0f || hVideo->drawSpotKinds != 0 ? BRF_NIGHT : 0;
+                features |= hVideo->drawSpotKinds;
+                features |= surface[3] > 0.0f || surface[7] > 0.0f ? BRF_SHADING : 0;
+                features |= surface[11] > 0.0f ? BRF_HAZE : 0;
+                features |= state->prim.fog_enabled ? BRF_FOG : 0;
+                features |= model->uv_source != 0 ? BRF_ENV : 0;
+                features |= sharp ? BRF_SHARP : 0;
+                features |= soft && base == BRENDER_FULL ? BRF_SOFT : 0;
+                features |= soft_distance > 0.0f ? BRF_SOFT_DEPTH : 0;
+                features |= glow > 0.0f ? BRF_GLOW : 0;
+                features |= wear > 0.0f ? BRF_WEAR : 0;
+                features |= hVideo->post.active ? BRF_POST : 0;
+                VIDEOI_UseBRenderFeatures(hVideo, base, features);
+            }
+            set_uniform1f(hVideo->variant->uniforms.glow_intensity, &hVideo->variant->glowIntensity, glow);
+            set_uniform1i(hVideo->variant->uniforms.sharp_filter, &hVideo->variant->sharp, sharp);
+            set_uniform1f(hVideo->variant->uniforms.surface_reflect, &hVideo->variant->reflect, blending_on && reflect <= 0.0f ? -1.0f : reflect);
+            set_uniform1i(hVideo->variant->uniforms.surface_sprite, &hVideo->variant->sprite, hVideo->post.drawSprite != 0);
+            set_uniform1i(hVideo->variant->uniforms.surface_soft, &hVideo->variant->soft, soft);
+            set_uniform1f(hVideo->variant->uniforms.surface_wear, &hVideo->variant->wear, wear);
+            if (soft_distance > 0.0f) {
+                glActiveTexture(GL_TEXTURE2);
+                glBindTexture(GL_TEXTURE_2D, hVideo->post.aoDepthTex);
+                glActiveTexture(GL_TEXTURE0);
+            }
+            set_uniform1f(hVideo->variant->uniforms.soft_distance, &hVideo->variant->softDistance, soft_distance);
             if (memcmp(surface, hVideo->variant->surfaceUploaded, sizeof(surface)) != 0) {
                 glUniform4fv(hVideo->variant->uniforms.surface_sun, 1, &surface[0]);
                 glUniform4fv(hVideo->variant->uniforms.surface_up, 1, &surface[4]);
@@ -552,7 +571,7 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
  * the program as draw_spots, so the fragments only go through those
  */
 static void draw_spots(HVIDEO hVideo, struct v11model* model, br_matrix34* m2v) {
-    int list[BR_GL_MAX_SCENE_LIGHTS];
+    int* list = hVideo->drawSpots;
     int n = 0;
     br_vector3 c;
     float r, scale, cc;
@@ -588,8 +607,19 @@ static void draw_spots(HVIDEO hVideo, struct v11model* model, br_matrix34* m2v) 
         }
         if (reaches) {
             list[n++] = i;
+            /* (a negative range: a blob shadow's radius; see brender.frag.glsl) */
+            hVideo->drawSpotKinds |= range > 0.0f ? BRF_LIGHTS : BRF_BLOBS;
+            hVideo->drawSpotKinds |= light[11] > 0.0f ? BRF_LIGHT_HAZE : 0;
         }
     }
+    hVideo->drawSpotCount = n;
+}
+
+/* The draw's spots (see draw_spots) to the program it is drawn with */
+static void give_draw_spots(HVIDEO hVideo) {
+    const int* list = hVideo->drawSpots;
+    int n = hVideo->drawSpotCount;
+
     if (n != hVideo->variant->drawSpotCount || memcmp(list, hVideo->variant->drawSpots, n * sizeof(int)) != 0) {
         glUniform1i(hVideo->variant->uniforms.num_draw_spots, n);
         if (n > 0) {
@@ -647,6 +677,12 @@ void StoredGLRenderGroup(br_geometry_stored* self, br_renderer* renderer, const 
 
     glBindVertexArray(self->gl_vao);
 
+    /* (before the program is chosen: the spots are one of its features) */
+    hVideo->drawSpotCount = 0;
+    hVideo->drawSpotKinds = 0;
+    if (hVideo->sceneLightCount > 0 && !hVideo->shadow.active) {
+        draw_spots(hVideo, self->model, &renderer->state.current->matrix.model_to_view);
+    }
     if (stored) {
         // jeff: disable culling to match behavior of existing hardware drivers
         apply_stored_properties(hVideo, &stored->state, MASK_STATE_PRIMITIVE | MASK_STATE_SURFACE /*| MASK_STATE_CULL */,
@@ -678,7 +714,7 @@ void StoredGLRenderGroup(br_geometry_stored* self, br_renderer* renderer, const 
         hVideo->shadow.valid[hVideo->shadow.level] = 1;
     }
     if (hVideo->sceneLightCount > 0 && !hVideo->shadow.active) {
-        draw_spots(hVideo, self->model, &renderer->state.current->matrix.model_to_view);
+        give_draw_spots(hVideo);
     }
     {
         /* the model state at the next free place in the ring (see video.h), in a fresh buffer when it is full */

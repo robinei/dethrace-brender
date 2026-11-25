@@ -23,6 +23,51 @@ precision lowp usampler2D;
 // 3dfx driver uses a fog table. This approximates the behavior :/
 #define FOGGING_EMULATE_3DFX_DENSITY_MULTIPLIER 80
 
+// The features: a program built for what is drawn has those it doesn't need defined false, their code left out
+// (see VIDEOI_UseBRenderFeatures); without, all are in, as the uniforms choose
+#ifndef F_NIGHT
+#define F_NIGHT true // the darkness, or lights (scene_brightness, num_spots)
+#endif
+#ifndef F_LIGHTS
+#define F_LIGHTS true // lights that reach what is drawn (draw_spots with a range)
+#endif
+#ifndef F_BLOBS
+#define F_BLOBS true // blob shadows that reach what is drawn (draw_spots with a radius)
+#endif
+#ifndef F_LIGHT_HAZE
+#define F_LIGHT_HAZE true // lights with haze that reach what is drawn, or the air before it
+#endif
+#ifndef F_SHADING
+#define F_SHADING true // the sun's and the relief's shading (surface_sun, surface_up)
+#endif
+#ifndef F_HAZE
+#define F_HAZE true // the aerial perspective (surface_haze)
+#endif
+#ifndef F_FOG
+#define F_FOG true // fog (fog_enabled)
+#endif
+#ifndef F_ENV
+#define F_ENV true // environment mapped texture coordinates (uv_source)
+#endif
+#ifndef F_SHARP
+#define F_SHARP true // the sharp filter (sharp_filter)
+#endif
+#ifndef F_SOFT
+#define F_SOFT true // soft edged textures (surface_soft)
+#endif
+#ifndef F_SOFT_DEPTH
+#define F_SOFT_DEPTH true // soft particles (soft_distance)
+#endif
+#ifndef F_GLOW
+#define F_GLOW true // glowing texels (glow_intensity)
+#endif
+#ifndef F_WEAR
+#define F_WEAR true // car wear (surface_wear)
+#endif
+#ifndef F_POST
+#define F_POST true // the post-processing's normals
+#endif
+
 struct br_light
 {
     vec4 position;    /* (X, Y, Z, 1) */
@@ -405,7 +450,7 @@ vec2 SurfaceMapEnvironment(in vec3 eye, in vec3 normal, in mat4 model_to_environ
 
 vec2 SurfaceMap(in vec3 position, in vec3 normal, in vec2 uv)
 {
-    if(uv_source == UV_SOURCE_ENV_L) {
+    if(F_ENV && uv_source == UV_SOURCE_ENV_L) {
         /*
          * Generate U,V for environment assuming local eye.
          *
@@ -413,7 +458,7 @@ vec2 SurfaceMap(in vec3 position, in vec3 normal, in vec2 uv)
          */
         vec3 eye = normalize(eye_m.xyz - position);
         uv = SurfaceMapEnvironment(eye, normal, environment);
-    } else if(uv_source == UV_SOURCE_ENV_I) {
+    } else if(F_ENV && uv_source == UV_SOURCE_ENV_I) {
         /*
          * Generate U,V for environment assuming infinite eye.
          *
@@ -461,7 +506,7 @@ float atmosphere(vec3 colour, float most, float start, float range, float k, boo
 
 // Applies the fog, returns its strength
 float doDistanceFog() {
-    if (fog_enabled && fog_distance) {
+    if (F_FOG && fog_enabled && fog_distance) {
         if (fog_colour == vec3(0.0) && surface_haze[1].z > 0.0) {
             // the night haze instead of the darkness (see main)
             return 0.0;
@@ -470,7 +515,7 @@ float doDistanceFog() {
         // so nothing pops in at the far edge
         return atmosphere(fog_colour * scene_brightness, 1.0, fog_min, fog_max - fog_min, 3.0, true, fog_colour == vec3(0.0));
     }
-    if (fog_enabled) {
+    if (F_FOG && fog_enabled) {
 
         // Compute exponential fog factor
         float linear_depth = (hither_z * yon_z / (yon_z - gl_FragCoord.z * (yon_z - hither_z)));
@@ -505,7 +550,7 @@ void main() {
         // Lit, non-prelit vertices already include the material colour.
         textureColour = (lighting == 1u && prelit == 0u) ? vec4(1.0) : surface_colour;
     } else {
-        if (sharp_filter) {
+        if (F_SHARP && sharp_filter) {
             // Anti-aliased nearest: flat texels, with a bilinear blend only in a ~1 screen pixel band
             // around texel borders. When minified the band covers the whole texel (plain trilinear).
             // textureGrad keeps the mip level and anisotropy based on the unsnapped coordinates.
@@ -522,7 +567,7 @@ void main() {
 #ifndef OPAQUE
         // (OPAQUE: drawn with what has nothing to cut out, and no clip planes, see apply_stored_properties: no
         // discard anywhere, so the depth is tested before shading)
-        if (surface_soft) {
+        if (F_SOFT && surface_soft) {
             // the cut out shape, blurred (two mip levels coarser), un-premultiplied, and faded towards the quad's
             // rim, so no hard border shows
             float lod = log2(max(max(length(dFdx(mappedUV) * vec2(textureSize(main_texture, 0))),
@@ -570,22 +615,22 @@ void main() {
     }
     // (the track materials are lit or not as their files say, so this goes by whether there is a normal:
     // not for the sprites)
-    if ((surface_sun.w > 0.0 || surface_up.w > 0.0) && !disable_texture && dot(normal.xyz, normal.xyz) > 0.01) {
+    if (F_SHADING && (surface_sun.w > 0.0 || surface_up.w > 0.0) && !disable_texture && dot(normal.xyz, normal.xyz) > 0.01) {
         fragColour.rgb *= surfaceShading(rawPosition, position.xyz, normal.xyz, mappedUV, reliefUV);
     }
 
-    if (surface_wear > 0.0 && !disable_texture) {
+    if (F_WEAR && surface_wear > 0.0 && !disable_texture) {
         fragColour.rgb = carWear(fragColour.rgb, rawPosition);
     }
 
     vec3 flashColour = vec3(0.0);
     float glowMask = 0.0;
-    if (glow_intensity > 0.0 && !disable_texture) {
+    if (F_GLOW && glow_intensity > 0.0 && !disable_texture) {
         glowMask = texture(glow_texture, mappedUV).r * glow_intensity;
     }
-    if (scene_brightness < 1.0 || num_spots > 0) {
+    if (F_NIGHT && (scene_brightness < 1.0 || num_spots > 0)) {
         // night: dark, lit by the headlights (warm white), light sources keep their own brightness
-        if (num_spots > 0) {
+        if (F_LIGHTS && num_spots > 0) {
             spotLight = spotLighting(position.xyz, normalize(normal.xyz));
         }
         // lit up to the normal (daylight) brightness, not beyond, so close bright surfaces don't blow out
@@ -595,7 +640,7 @@ void main() {
         flashColour = fragColour.rgb * flashLight;
         lit += flashColour;
         fragColour.rgb = mix(lit, textureColour.rgb, clamp(glowMask, 0.0, 1.0) * (1.0 - scene_brightness));
-        if (num_spots > 0) {
+        if (F_BLOBS && num_spots > 0) {
             fragColour.rgb *= blobShadow(position.xyz, normalize(normal.xyz));
         }
     }
@@ -625,7 +670,7 @@ void main() {
         fragColour.rgb *= vec3(ka, ka, ka);
     }
 
-    if (surface_haze[0].w > 0.0) {
+    if (F_HAZE && surface_haze[0].w > 0.0) {
         // aerial perspective: everything takes on a little of the haze (sky) colour with distance, sharp. At
         // night (instead of the darkness) in the night's light
         bool night = surface_haze[1].z > 0.0;
@@ -633,11 +678,11 @@ void main() {
     }
 
     float fog = doDistanceFog();
-    if (num_spots > 0) {
+    if (F_LIGHT_HAZE && num_spots > 0) {
         fragColour.rgb += spotHaze(position.xyz);
     }
 
-    if (soft_distance > 0.0) {
+    if (F_SOFT_DEPTH && soft_distance > 0.0) {
         // the solid scene's distance here, from its depth by the projection (as the depth was made)
         float ndc = 2.0 * texelFetch(soft_depth, ivec2(gl_FragCoord.xy), 0).r - 1.0;
         float scene = projection[3][2] / (ndc + projection[2][2]);
@@ -656,7 +701,9 @@ void main() {
     if (surface_reflect >= 0.0) {
         glowColour.a = 1.0 - surface_reflect * (dot(normal.xyz, normal.xyz) > 0.01 ? 1.0 : 0.0);
     }
-    {
+    if (!F_POST) {
+        normalColour = vec4(0.0);
+    } else {
         vec3 sn = surfaceNormal(position.xyz, normal.xyz);
         normalColour = dot(sn, sn) > 0.5 ? vec4(sn * 0.5 + 0.5, surface_sprite ? 1.0 : 2.0 / 3.0) : vec4(0.5, 0.5, 1.0, surface_sprite ? 1.0 : 0.0);
     }

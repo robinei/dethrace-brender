@@ -84,6 +84,7 @@ typedef struct br_device_gl_callback_procs {
     br_device_gl_texturereflect_cbfn       *texture_reflect;
     br_device_gl_textureslot_cbfn          *texture_slot;
     br_device_gl_slotwear_cbfn             *slot_wear;
+    const char*                            program_list;    /* Optional. A file listing the programs built for features (see VIDEOI_UseBRenderFeatures) */
     br_int_32                              fog_distance;    /* Non-zero: fog by distance, from fog_min to fully fogged at fog_max */
     br_int_32                              msaa_samples;    /* The post-processed scene's multisampling (the window's otherwise) */
 } br_device_gl_callback_procs;

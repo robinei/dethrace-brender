@@ -127,15 +127,11 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
     /* Bind the model UBO here, it's faster than doing it for each model group */
     glBindBufferBase(GL_UNIFORM_BUFFER, hVideo->brenderProgram.blockBindingModel, hVideo->brenderProgram.uboModel);
     {
-        /* the scene's uniforms, for each program it may be drawn with (the shadow maps': that one) */
+        /* the scene's uniforms: each program is given them the first time it is used in the scene (scene_uniforms) */
         float brightness = 1.0f;
         const float* lights = NULL;
         int count = hVideo->sceneLighting != NULL ? hVideo->sceneLighting(&brightness, &lights) : 0;
         float surface[BR_GL_SCENE_SURFACE_FLOATS] = { 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
-        static const int scene_variants[] = { BRENDER_OPAQUE, BRENDER_FULL };
-        static const int shadow_variants[] = { BRENDER_SHADOW_OPAQUE, BRENDER_SHADOW };
-        const int* which = hVideo->shadow.active ? shadow_variants : scene_variants;
-        int n = 2;
 
         hVideo->sceneMultisampled = hVideo->shadow.active ? 0
             : hVideo->post.active ? hVideo->post.samples > 0 : hVideo->sampleBuffers != 0;
@@ -147,33 +143,10 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
         if (hVideo->sceneSurface == NULL || !hVideo->sceneSurface(surface)) {
             surface[3] = surface[7] = surface[11] = surface[13] = 0.0f;
         }
-        for (int i = 0; i < n; i++) {
-            const brender_uniforms* u;
-            VIDEOI_UseBRenderVariant(hVideo, which[i]);
-            u = &hVideo->variant->uniforms;
-            glUniform1i(u->main_texture, hVideo->brenderProgram.mainTextureBinding);
-            glUniform1i(u->glow_texture, 1);
-            glUniform1i(u->soft_depth, 2);
-            glUniform1f(u->scene_brightness, brightness);
-            glUniform1i(u->num_spots, lights != NULL ? count : 0);
-            /* (each draw gives those of them that reach it, see StoredGLRenderGroup) */
-            glUniform1i(u->num_draw_spots, 0);
-            hVideo->variant->drawSpotCount = 0;
-            if (lights != NULL && count > 0) {
-                glUniform4fv(u->spots, 3 * count, lights);
-            }
-            glUniform4fv(u->surface_sun, 1, &surface[0]);
-            glUniform4fv(u->surface_up, 1, &surface[4]);
-            glUniform4fv(u->surface_haze, 2, &surface[8]);
-            memcpy(hVideo->variant->surfaceUploaded, surface, sizeof(surface));
-            glUniform1f(u->glow_intensity, 0.0f);
-            glUniform1i(u->alpha_to_coverage, hVideo->sceneMultisampled);
-            glUniform1i(u->fog_distance, hVideo->fogDistance != 0);
-            /* (the per draw ones: not known) */
-            hVideo->variant->glowIntensity = hVideo->variant->reflect = hVideo->variant->wear = hVideo->variant->softDistance = -2.0f;
-            hVideo->variant->sharp = hVideo->variant->sprite = hVideo->variant->soft = -1;
-            hVideo->variant->alphaToCoverage = hVideo->sceneMultisampled;
-        }
+        hVideo->sceneBrightness = brightness;
+        memcpy(hVideo->sceneSurfaceValues, surface, sizeof(surface));
+        hVideo->sceneSerial++;
+        VIDEOI_UseBRenderVariant(hVideo, hVideo->shadow.active ? BRENDER_SHADOW : BRENDER_FULL);
     }
     if (hVideo->post.active) {
         /* light sources go to the glow attachment, for the post-processed bloom; the surfaces' normals to the
@@ -186,6 +159,11 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
     if (self->pixelmap->msaa_samples)
         glEnable(GL_MULTISAMPLE);
 
+    if (hVideo->post.active && !hVideo->shadow.active && !hVideo->programsBuilt) {
+        /* (the post-processed scene's targets bound) */
+        VIDEOI_BuildListedPrograms(hVideo, self->pixelmap->screen->asFront.screen_buffer_vao);
+        VIDEOI_UseBRenderVariant(hVideo, BRENDER_FULL);
+    }
     if (hVideo->shadow.active) {
         /* the sun's shadow map: only its depth, pushed back a little against the shadow acne of the faces
          * themselves */

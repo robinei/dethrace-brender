@@ -376,6 +376,9 @@ br_device_pixelmap* DevicePixelmapGLAllocateFront(br_device* dev, br_output_faci
     self->asFront.video.textureSharp = pt.callbacks->texture_sharp;
     self->asFront.video.textureUpscaler = pt.callbacks->texture_upscaler;
     self->asFront.video.fogDistance = pt.callbacks->fog_distance;
+    if (pt.callbacks->program_list != NULL) {
+        BrStrNCpy(self->asFront.video.programList, pt.callbacks->program_list, sizeof(self->asFront.video.programList) - 1);
+    }
     self->asFront.video.msaaSamples = pt.callbacks->msaa_samples;
     self->asFront.video.textureGlow = pt.callbacks->texture_glow;
     self->asFront.video.glowScale = pt.callbacks->glow_scale;

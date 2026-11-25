@@ -37,6 +37,44 @@ typedef struct brender_uniforms {
 
 enum { BRENDER_FULL, BRENDER_OPAQUE, BRENDER_SHADOW, BRENDER_SHADOW_OPAQUE, BRENDER_VARIANTS };
 
+/* brender.frag's features (its F_*), a bit each, in its order: what a draw needs (see VIDEOI_UseBRenderFeatures) */
+enum {
+    BRF_NIGHT = 1 << 0,
+    BRF_SHADING = 1 << 1,
+    BRF_HAZE = 1 << 2,
+    BRF_FOG = 1 << 3,
+    BRF_ENV = 1 << 4,
+    BRF_SHARP = 1 << 5,
+    BRF_SOFT = 1 << 6,
+    BRF_SOFT_DEPTH = 1 << 7,
+    BRF_GLOW = 1 << 8,
+    BRF_WEAR = 1 << 9,
+    BRF_POST = 1 << 10,
+    BRF_LIGHTS = 1 << 11,
+    BRF_BLOBS = 1 << 12,
+    BRF_LIGHT_HAZE = 1 << 13,
+    BRF_COUNT = 14
+};
+/* the most programs built for features (beyond that the general ones draw) */
+#define BRENDER_FEATURE_PROGRAMS 64
+
+/* brender.vert/frag as built for some of what is drawn, and the uniforms last given to it */
+typedef struct brender_variant {
+    GLuint program;
+    brender_uniforms uniforms;
+    int sceneSerial; /* the scene whose uniforms it has (see scene_uniforms) */
+    float surfaceUploaded[BR_GL_SCENE_SURFACE_FLOATS]; /* the scene_surface parameters last given to it */
+    int drawSpots[BR_GL_MAX_SCENE_LIGHTS], drawSpotCount; /* the draw_spots last given to it */
+    /* the per draw uniforms last given to it (see apply_stored_properties; reset with the scene's uniforms) */
+    float glowIntensity, reflect, wear, softDistance;
+    int sharp, sprite, soft, alphaToCoverage;
+    /* (built for features) BRENDER_FULL or BRENDER_OPAQUE, the features; whether it is in the program list (see
+     * VIDEOI_UseBRenderFeatures) */
+    int base;
+    unsigned features;
+    int listed, failed;
+} brender_variant;
+
 /* post.frag's passes (its stages): 0 all at once, 1 the lit scene, 2 the blurs and the rest of it, 3 the sun's
  * shadow at half resolution, 4 the wet ground's reflections at half resolution, 5 the depth of field at half
  * resolution */
@@ -61,6 +99,7 @@ typedef struct _VIDEO {
     br_device_gl_texturereflect_cbfn* textureReflect;
     br_device_gl_textureslot_cbfn* textureSlot;
     br_device_gl_slotwear_cbfn* slotWear;
+    char programList[512]; /* (callbacks' program_list, "" for none) */
 
     struct {
         GLuint program;
@@ -116,15 +155,18 @@ typedef struct _VIDEO {
      * - BRENDER_SHADOW_OPAQUE: SHADOW_PASS and OPAQUE, only the position: the shadow maps' opaque draws
      * (0 for one that didn't build: BRENDER_FULL instead, BRENDER_SHADOW for BRENDER_SHADOW_OPAQUE)
      */
-    struct {
-        GLuint program;
-        brender_uniforms uniforms;
-        float surfaceUploaded[BR_GL_SCENE_SURFACE_FLOATS]; /* the scene_surface parameters last given to it */
-        int drawSpots[BR_GL_MAX_SCENE_LIGHTS], drawSpotCount; /* the draw_spots last given to it */
-        /* the per draw uniforms last given to it (see apply_stored_properties; reset by sceneBegin) */
-        float glowIntensity, reflect, wear, softDistance;
-        int sharp, sprite, soft, alphaToCoverage;
-    } variants[BRENDER_VARIANTS], *variant; /* (the one in use) */
+    brender_variant variants[BRENDER_VARIANTS], *variant; /* (the one in use) */
+    /*
+     * The BRENDER_FULL and BRENDER_OPAQUE draws' programs built for their features: the code of those they don't
+     * need left out (see VIDEOI_UseBRenderFeatures)
+     */
+    brender_variant featurePrograms[BRENDER_FEATURE_PROGRAMS];
+    int featureProgramCount;
+    int programListRead, programsBuilt; /* the program list read; its programs built (VIDEOI_BuildListedPrograms) */
+    /* the scene's uniforms, given to each program the first time it is used in the scene (see sceneBegin) */
+    int sceneSerial;
+    float sceneBrightness;
+    float sceneSurfaceValues[BR_GL_SCENE_SURFACE_FLOATS];
     /*
      * The GL state the draws of a scene last set (see apply_stored_properties): what is already so isn't set again.
      * -1 for not known (sceneBegin resets it, as anything may have changed it in between)
@@ -135,6 +177,8 @@ typedef struct _VIDEO {
         GLint blendFunc[4];
     } drawState;
     const float* sceneLights; /* the scene's lights (spots), as the scene_lighting callback gave them */
+    int drawSpots[BR_GL_MAX_SCENE_LIGHTS], drawSpotCount; /* those that reach what is being drawn (see draw_spots) */
+    unsigned drawSpotKinds; /* what they are: BRF_LIGHTS, BRF_BLOBS, BRF_LIGHT_HAZE */
     int sceneLightCount;
     int sceneClipPlanes; /* the scene being drawn has clip planes (only BRENDER_FULL clips) */
 
