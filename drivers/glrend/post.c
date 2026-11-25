@@ -346,7 +346,9 @@ br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap* screen, br_boolean gl
         }
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.samples > 0 ? hVideo->post.msaaFbo : hVideo->post.resolveFbo);
+    hVideo->post.sceneFbo = hVideo->post.samples > 0 ? hVideo->post.msaaFbo : hVideo->post.resolveFbo;
+    hVideo->post.tail = 0;
+    glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.sceneFbo);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glDepthMask(GL_TRUE);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -447,6 +449,25 @@ static void post_stage(HVIDEO hVideo, int stage, int sun_half, int wet_half) {
     glDrawArrays(GL_TRIANGLES, 0, 3);
 }
 
+/* The multisampled scene (msaaFbo) resolved into resolveFbo's textures */
+static void resolve_scene(HVIDEO hVideo, int w, int h) {
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, hVideo->post.msaaFbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, hVideo->post.resolveFbo);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+    if (hVideo->post.glowTex != 0) {
+        glReadBuffer(GL_COLOR_ATTACHMENT1);
+        glDrawBuffer(GL_COLOR_ATTACHMENT1);
+        glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    }
+    glReadBuffer(GL_COLOR_ATTACHMENT2);
+    glDrawBuffer(GL_COLOR_ATTACHMENT2);
+    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+}
+
 void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_params* params) {
     br_device_pixelmap* self = (br_device_pixelmap*)screen;
     HVIDEO hVideo;
@@ -483,22 +504,8 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     ao = params->ao_strength > 0.0f && hVideo->post.viewArea > 0;
     ao_depth = hVideo->post.depthSnapshot ? hVideo->post.aoDepthTex : hVideo->post.depthTex;
 
-    if (hVideo->post.samples > 0) {
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, hVideo->post.msaaFbo);
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, hVideo->post.resolveFbo);
-        glReadBuffer(GL_COLOR_ATTACHMENT0);
-        glDrawBuffer(GL_COLOR_ATTACHMENT0);
-        glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-        if (hVideo->post.glowTex != 0) {
-            glReadBuffer(GL_COLOR_ATTACHMENT1);
-            glDrawBuffer(GL_COLOR_ATTACHMENT1);
-            glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-        }
-        glReadBuffer(GL_COLOR_ATTACHMENT2);
-        glDrawBuffer(GL_COLOR_ATTACHMENT2);
-        glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-        glReadBuffer(GL_COLOR_ATTACHMENT0);
-        glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    if (hVideo->post.samples > 0 && !hVideo->post.tail) {
+        resolve_scene(hVideo, w, h);
     }
     if (hVideo->post.glowTex != 0) {
         glBindTexture(GL_TEXTURE_2D, hVideo->post.glowTex);
@@ -755,7 +762,8 @@ void BR_PUBLIC_ENTRY BrGLPostProcessDepthSnapshot(br_pixelmap* screen) {
         return;
     }
     hVideo = &self->asFront.video;
-    if (!hVideo->post.active || hVideo->post.aoDepthFbo == 0) {
+    /* (multisampled, with soft particles: they take it, from the scene resolved, see BrGLPostProcessSoftParticles) */
+    if (!hVideo->post.active || hVideo->post.aoDepthFbo == 0 || (hVideo->post.samples > 0 && hVideo->post.softParticlesSeen)) {
         return;
     }
     w = hVideo->post.width;
@@ -777,10 +785,42 @@ void BR_PUBLIC_ENTRY BrGLPostProcessDepthSnapshot(br_pixelmap* screen) {
 void BR_PUBLIC_ENTRY BrGLPostProcessSoftParticles(br_pixelmap* screen, float distance) {
     br_device_pixelmap* self = (br_device_pixelmap*)screen;
 
+    HVIDEO hVideo;
+
     if (self == NULL || self->screen != self) {
         return;
     }
-    self->asFront.video.post.softDistance = distance;
+    hVideo = &self->asFront.video;
+    hVideo->post.softDistance = distance;
+    if (hVideo->post.active && hVideo->post.samples > 0 && distance > 0.0f && !hVideo->post.tail) {
+        /*
+         * (multisampled) The scene's multisampled pass ends here, resolved, and the soft particles' depth is taken
+         * from it (also the ambient occlusion's: instead of a snapshot, which would end the pass in the middle,
+         * and the GPU (a tiled one) store and load all of the multisampled targets again for a few draws); they
+         * and what follows them are drawn into the textures, single sampled: soft edged and blended, they show no
+         * aliasing. Mid-scene: the scissor test aside for the blits
+         */
+        int w = hVideo->post.width, h = hVideo->post.height;
+        GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+        static const GLenum all[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
+        static const GLenum no_glow[] = { GL_COLOR_ATTACHMENT0, GL_NONE, GL_COLOR_ATTACHMENT2 };
+        glDisable(GL_SCISSOR_TEST);
+        resolve_scene(hVideo, w, h);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, hVideo->post.resolveFbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, hVideo->post.aoDepthFbo);
+        glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+        hVideo->post.sceneFbo = hVideo->post.resolveFbo;
+        hVideo->post.tail = 1;
+        hVideo->post.depthSnapshot = 1;
+        hVideo->post.softParticlesSeen = 1;
+        hVideo->sceneMultisampled = 0;
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.resolveFbo);
+        glDrawBuffers(3, hVideo->post.glowTex != 0 ? all : no_glow);
+        if (scissor) {
+            glEnable(GL_SCISSOR_TEST);
+        }
+        GL_CHECK_ERROR();
+    }
 }
 
 br_error BR_PUBLIC_ENTRY BrGLShadowPassBegin(br_pixelmap* screen, int size, int level) {

@@ -134,7 +134,7 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
         float surface[BR_GL_SCENE_SURFACE_FLOATS] = { 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
 
         hVideo->sceneMultisampled = hVideo->shadow.active ? 0
-            : hVideo->post.active ? hVideo->post.samples > 0 : hVideo->sampleBuffers != 0;
+            : hVideo->post.active ? hVideo->post.samples > 0 && !hVideo->post.tail : hVideo->sampleBuffers != 0;
         if (count > BR_GL_MAX_SCENE_LIGHTS) {
             count = BR_GL_MAX_SCENE_LIGHTS;
         }
@@ -198,9 +198,7 @@ void BR_CMETHOD_DECL(br_renderer_gl, sceneEnd)(br_renderer* self) {
     }
     /* keep rendering into the offscreen target of a post-processed view */
     glBindFramebuffer(GL_FRAMEBUFFER, self->pixelmap->screen->asFront.video.post.active
-        ? (self->pixelmap->screen->asFront.video.post.samples > 0 ? self->pixelmap->screen->asFront.video.post.msaaFbo
-                                                                   : self->pixelmap->screen->asFront.video.post.resolveFbo)
-        : 0);
+        ? self->pixelmap->screen->asFront.video.post.sceneFbo : 0);
     glUseProgram(0);
     self->has_begun = 0;
     GL_CHECK_ERROR();

@@ -211,6 +211,9 @@ typedef struct _VIDEO {
         GLuint dofFbo, dofTex; /* the depth of field's blur, half resolution (made when first needed) */
         GLuint glowHalfFbo, glowHalfTex; /* the bloom and lens flare, half resolution (made when first needed) */
         int depthSnapshot;
+        GLuint sceneFbo; /* the framebuffer the scene is being drawn into: msaaFbo, or resolveFbo (see tail) */
+        int tail; /* (multisampled) the scene resolved, the rest of it drawn single sampled, see BrGLPostProcessSoftParticles */
+        int softParticlesSeen; /* the soft particles were drawn the last frame (then they take the depth snapshot) */
         float softDistance; /* soft particles: what is drawn fades out this close to the snapshot depth, 0 for off */
         float drawSoftDistance; /* that of the models being drawn (kept in their state, see state_stack) */
         int sprites; /* what is drawn is sprites, see BrGLSprites */
