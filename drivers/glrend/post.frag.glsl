@@ -27,6 +27,8 @@ uniform sampler2D uWetHalf;
 uniform bool uWetHalfOn;
 // the depth of field's blur, half resolution (stage 5): colour, and in alpha the blur's radius / uMaxRadius
 uniform sampler2D uDofHalf;
+// the bloom and the lens flare (their strengths in), half resolution (stage 6)
+uniform sampler2D uGlowHalf;
 // lamps (street lamps, neon, signs) the air glows around at night: view space position and the reach of the glow,
 // colour and strength
 uniform vec4 uLamps[48];
@@ -975,6 +977,16 @@ void main() {
         fragColour = vec4(sunMaps(floor(p) * 2.0 + 1.0));
         return;
     }
+    if (STAGE == 6) {
+        // (every other pixel's, see uGlowHalf)
+        vec2 uv = (floor(p) * 2.0 + 1.0) / size;
+        vec3 g = bloom(uv) * uGlowStrength;
+        if (uFlareStrength > 0.0) {
+            g += flare(uv, size) * uFlareStrength;
+        }
+        fragColour = vec4(g, 1.0);
+        return;
+    }
     if (STAGE == 5) {
         // (every other pixel's, see dofHalf)
         fragColour = dofHalf(floor(p) * 2.0 + 1.0, size);
@@ -1017,11 +1029,8 @@ void main() {
         }
     }
     if (uGlowStrength > 0.0) {
-        vec2 uv = p / size;
-        c += bloom(uv) * uGlowStrength;
-        if (uFlareStrength > 0.0) {
-            c += flare(uv, size) * uFlareStrength;
-        }
+        // (made at half resolution, filtered: both are smooth, from the glow's coarser mip levels)
+        c += texture(uGlowHalf, p / size).rgb;
     }
     if (uGrade.x > 0.0) {
         c = grade(c);

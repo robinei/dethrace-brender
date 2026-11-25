@@ -77,8 +77,8 @@ typedef struct brender_variant {
 
 /* post.frag's passes (its stages): 0 all at once, 1 the lit scene, 2 the blurs and the rest of it, 3 the sun's
  * shadow at half resolution, 4 the wet ground's reflections at half resolution, 5 the depth of field at half
- * resolution */
-#define POST_STAGES 6
+ * resolution, 6 the bloom and lens flare at half resolution */
+#define POST_STAGES 7
 
 typedef struct _VIDEO {
     GLint maxUniformBlockSize;
@@ -209,6 +209,7 @@ typedef struct _VIDEO {
         GLuint sunFbo, sunTex; /* the sun's shadow from its maps, half resolution (made when first needed) */
         GLuint wetFbo, wetTex; /* the wet ground's reflections, half resolution (made when first needed) */
         GLuint dofFbo, dofTex; /* the depth of field's blur, half resolution (made when first needed) */
+        GLuint glowHalfFbo, glowHalfTex; /* the bloom and lens flare, half resolution (made when first needed) */
         int depthSnapshot;
         float softDistance; /* soft particles: what is drawn fades out this close to the snapshot depth, 0 for off */
         float drawSoftDistance; /* that of the models being drawn (kept in their state, see state_stack) */
