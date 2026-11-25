@@ -511,13 +511,13 @@ br_error BR_CMETHOD_DECL(br_device_pixelmap_gl, flush)(br_device_pixelmap* self)
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, self->pm_width, self->pm_height, gl_format, gl_type, self->asBack.lockedPixels);
 
     // render locked pixels to framebuffer texture, ignoring purple pixels
-    RenderFullScreenTextureToFrameBuffer(self->screen, self->asBack.overlayTexture, 0, 0, 1, 0);
+    RenderFullScreenTextureToFrameBuffer(self->screen, self->asBack.overlayTexture, 0, 0, 1, 0, self->asBack.lockedPixels, self->pm_row_bytes);
 
     // the moved layer over it
     if (self->asBack.sideDirty && self->asBack.sideLockedPixels != NULL) {
         glBindTexture(GL_TEXTURE_2D, self->asBack.sideTexture);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, self->pm_width, self->pm_height, gl_format, gl_type, self->asBack.sideLockedPixels);
-        RenderFullScreenTextureToFrameBuffer(self->screen, self->asBack.sideTexture, 0, 0, 1, 1);
+        RenderFullScreenTextureToFrameBuffer(self->screen, self->asBack.sideTexture, 0, 0, 1, 1, self->asBack.sideLockedPixels, self->pm_row_bytes);
     }
 
     // reset pixels back to gamedev purple

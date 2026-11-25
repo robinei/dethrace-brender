@@ -171,13 +171,62 @@ static void update_region_grid(br_device_pixelmap* self, int region_count, const
     BrScratchFree(grid);
 }
 
-void RenderFullScreenTextureToFrameBuffer(br_device_pixelmap* self, GLuint textureId, GLuint fb, int flipVertically, int discardPurplePixels, int moved) {
+/*
+ * The overlay's parts with something in them (not all the transparent purple): its OVERLAY_CELL pixel cells
+ * that do, merged along each row of cells, as rectangles (left, top, right, bottom in overlay pixels). Returns
+ * how many, or -1 for more than max
+ */
+#define OVERLAY_CELL 16
+static int overlay_content(const br_uint_16* pixels, br_int_32 row_bytes, int width, int height, int* rects, int max) {
+    int cells_x = (width + OVERLAY_CELL - 1) / OVERLAY_CELL;
+    int count = 0, cx, cy, x, y;
+
+    for (cy = 0; cy * OVERLAY_CELL < height; cy++) {
+        int y1 = (cy + 1) * OVERLAY_CELL < height ? (cy + 1) * OVERLAY_CELL : height;
+        int run = -1;
+        for (cx = 0; cx <= cells_x; cx++) {
+            int used = 0;
+            if (cx < cells_x) {
+                int x0 = cx * OVERLAY_CELL, x1 = x0 + OVERLAY_CELL < width ? x0 + OVERLAY_CELL : width;
+                for (y = cy * OVERLAY_CELL; y < y1 && !used; y++) {
+                    const br_uint_16* row = (const br_uint_16*)((const char*)pixels + (size_t)y * row_bytes);
+                    for (x = x0; x < x1; x++) {
+                        if (row[x] != BR_COLOUR_565(31, 0, 31)) {
+                            used = 1;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (used && run < 0) {
+                run = cx;
+            } else if (!used && run >= 0) {
+                if (count == max) {
+                    return -1;
+                }
+                rects[4 * count + 0] = run * OVERLAY_CELL;
+                rects[4 * count + 1] = cy * OVERLAY_CELL;
+                rects[4 * count + 2] = cx * OVERLAY_CELL < width ? cx * OVERLAY_CELL : width;
+                rects[4 * count + 3] = y1;
+                count++;
+                run = -1;
+            }
+        }
+    }
+    return count;
+}
+
+void RenderFullScreenTextureToFrameBuffer(br_device_pixelmap* self, GLuint textureId, GLuint fb, int flipVertically, int discardPurplePixels, int moved,
+    const br_uint_16* pixels, br_int_32 row_bytes) {
 
     int x, y, i, region_count;
     float width_m, height_m, margin;
     const float* regions;
     GLfloat rects[4 * BR_GL_MAX_OVERLAY_REGIONS];
     GLfloat shifts[BR_GL_MAX_OVERLAY_REGIONS];
+    int parts[4 * (256 + BR_GL_MAX_OVERLAY_REGIONS)], part_count;
+    GLint vp[4], box[4];
+    GLboolean scissor;
 
     DevicePixelmapGLGetViewport(self, &x, &y, &width_m, &height_m);
 
@@ -228,7 +277,40 @@ void RenderFullScreenTextureToFrameBuffer(br_device_pixelmap* self, GLuint textu
         glEnable(GL_BLEND);
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     }
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+    /*
+     * Only where the overlay has something (most of it is transparent): the cells with something, scissored,
+     * and the moved regions' new places. A pixel's sampling reaches one overlay pixel around it
+     */
+    part_count = pixels != NULL && discardPurplePixels ? overlay_content(pixels, row_bytes, self->pm_width, self->pm_height, parts, 256) : -1;
+    if (part_count >= 0) {
+        for (i = 0; i < region_count; i++) {
+            parts[4 * part_count + 0] = (int)floorf(rects[4 * i + 0] + shifts[i]);
+            parts[4 * part_count + 1] = (int)floorf(rects[4 * i + 1]);
+            parts[4 * part_count + 2] = (int)ceilf(rects[4 * i + 2] + shifts[i]);
+            parts[4 * part_count + 3] = (int)ceilf(rects[4 * i + 3]);
+            part_count++;
+        }
+        glGetIntegerv(GL_VIEWPORT, vp);
+        scissor = glIsEnabled(GL_SCISSOR_TEST);
+        glGetIntegerv(GL_SCISSOR_BOX, box);
+        glEnable(GL_SCISSOR_TEST);
+        for (i = 0; i < part_count; i++) {
+            /* (overlay pixels to the viewport's window pixels: x from the layer's left margin, y from the top) */
+            float sx = vp[2] / (self->pm_width + 2.f * margin), sy = vp[3] / (float)self->pm_height;
+            int x0 = vp[0] + (int)floorf((parts[4 * i + 0] - 1 + margin) * sx);
+            int x1 = vp[0] + (int)ceilf((parts[4 * i + 2] + 1 + margin) * sx);
+            int y0 = vp[1] + vp[3] - (int)ceilf((parts[4 * i + 3] + 1) * sy);
+            int y1 = vp[1] + vp[3] - (int)floorf((parts[4 * i + 1] - 1) * sy);
+            glScissor(x0, y0, x1 - x0, y1 - y0);
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+        }
+        glScissor(box[0], box[1], box[2], box[3]);
+        if (!scissor) {
+            glDisable(GL_SCISSOR_TEST);
+        }
+    } else {
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+    }
     glDisable(GL_BLEND);
     if (region_count > 0) {
         glActiveTexture(GL_TEXTURE1);

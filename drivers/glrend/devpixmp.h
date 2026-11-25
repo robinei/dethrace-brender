@@ -135,7 +135,8 @@ typedef struct br_device_pixelmap {
     struct br_device_clut* clut;
 } br_device_pixelmap;
 
-void RenderFullScreenTextureToFrameBuffer(br_device_pixelmap* self, GLuint textureId, GLuint fb, int flipVertically, int discardPurplePixels, int moved);
+void RenderFullScreenTextureToFrameBuffer(br_device_pixelmap* self, GLuint textureId, GLuint fb, int flipVertically, int discardPurplePixels, int moved,
+    const br_uint_16* pixels, br_int_32 row_bytes);
 
 #endif
 
