@@ -154,7 +154,7 @@ typedef struct _VIDEO {
         GLuint msaaFbo, msaaColour, msaaGlow, msaaDepth, msaaNormal; /* multisampled target, when samples > 0 */
         GLuint resolveFbo, colourTex, glowTex, depthTex;
         GLuint normalTex; /* the surfaces' view space normals (and the sprites' mark), see brender.frag.glsl */
-        GLuint aoFbo[2], aoTex[2]; /* ambient occlusion, half resolution (and a target for its blur) */
+        GLuint aoFbo[3], aoTex[3]; /* ambient occlusion, half resolution (and a target for its blur, and the distance) */
         GLuint aoDepthFbo, aoDepthTex; /* the depth snapshot the ambient occlusion uses, see BrGLPostProcessDepthSnapshot */
         GLuint litFbo, litTex; /* the lit scene, for the blurs (made when first needed), see BrGLPostProcessEnd */
         GLuint sunFbo, sunTex; /* the sun's shadow from its maps, half resolution (made when first needed) */
@@ -166,7 +166,7 @@ typedef struct _VIDEO {
         int sprites; /* what is drawn is sprites, see BrGLSprites */
         int drawSprite; /* the model being drawn is (kept in its state) */
         GLuint program, aoProgram;
-        GLint uniforms[64], aoUniforms[8]; /* (see the uniform lists in post.c) */
+        GLint uniforms[64], aoUniforms[16]; /* (see the uniform lists in post.c) */
         GLuint weatherProgram; /* snow and rain particles, see weather.vert.glsl */
         GLint weatherUniforms[24];
         /* the view: the largest perspective scene drawn while active */

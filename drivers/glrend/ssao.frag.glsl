@@ -12,9 +12,13 @@ precision highp float;
 // scene on a disc around each pixel occlude it by how much they rise above its surface, more the closer
 // they are, and not at all beyond the radius: so it collects in creases, corners and under things, flat
 // open ground stays clear, and nothing far in front (a pedestrian before a wall) leaves a halo.
-// The disc is rotated in a 4x4 tiled pattern, which the two depth aware blur passes after it remove.
-//   uPass 0: ambient occlusion, 1 and 2: blur uAO horizontally / vertically
+// The disc is rotated in a 4x4 tiled pattern, which the two depth aware blur passes after it remove. All of it
+// reads the view's distance at half resolution (uLinear, made first: a quarter of the depth's texels to go
+// through, already linear).
+//   uPass 3: the distance at half resolution (from uDepth), 0: ambient occlusion, 1 and 2: blur uAO
+//   horizontally / vertically
 uniform sampler2D uDepth;
+uniform sampler2D uLinear;
 uniform sampler2D uAO;
 uniform int uPass;
 uniform vec4 uView;     // the 3d view in window pixels: x, y, width, height
@@ -25,15 +29,19 @@ uniform float uRadius;  // world units
 
 out vec4 fragColour;
 
-const int SAMPLES = 16;
-const float TURNS = 7.0; // spiral turns over the samples (coprime with SAMPLES)
+const int SAMPLES = 8;
+const float TURNS = 5.0; // spiral turns over the samples (coprime with SAMPLES)
 
 float linearDepth(float d) {
     return 2.0 * uNear * uFar / (uFar + uNear - (2.0 * d - 1.0) * (uFar - uNear));
 }
 
+// the view space position at the half resolution pixel holding window pixel px (at its centre: every other
+// window pixel)
 vec3 viewPosition(vec2 px) {
-    float z = linearDepth(texelFetch(uDepth, ivec2(px), 0).r);
+    ivec2 h = ivec2(px * 0.5);
+    float z = texelFetch(uLinear, h, 0).r;
+    px = vec2(h) * 2.0 + 1.0;
     vec2 ndc = (px - uView.xy) / uView.zw * 2.0 - 1.0;
     return vec3(ndc.x * z / uProj.x, ndc.y * z / uProj.y, -z);
 }
@@ -46,13 +54,13 @@ bool outside(vec2 px) {
 float blur(ivec2 q, ivec2 dir) {
     const float weights[5] = float[5](0.20, 0.17, 0.12, 0.07, 0.03);
     ivec2 size = textureSize(uAO, 0);
-    float z = linearDepth(texelFetch(uDepth, q * 2 + 1, 0).r);
+    float z = texelFetch(uLinear, q, 0).r;
     float sum = texelFetch(uAO, q, 0).r * weights[0];
     float weight = weights[0];
     for (int i = 1; i < 5; i++) {
         for (int side = -1; side <= 1; side += 2) {
             ivec2 t = clamp(q + dir * (i * side), ivec2(0), size - 1);
-            float zt = linearDepth(texelFetch(uDepth, t * 2 + 1, 0).r);
+            float zt = texelFetch(uLinear, t, 0).r;
             float w = weights[i] * max(0.0, 1.0 - abs(zt - z) / (0.03 * z + 0.02));
             sum += texelFetch(uAO, t, 0).r * w;
             weight += w;
@@ -62,12 +70,17 @@ float blur(ivec2 q, ivec2 dir) {
 }
 
 void main() {
+    if (uPass == 3) {
+        float d = texelFetch(uDepth, ivec2(floor(gl_FragCoord.xy) * 2.0 + 1.0), 0).r;
+        fragColour = vec4(linearDepth(d));
+        return;
+    }
     if (uPass != 0) {
         fragColour = vec4(blur(ivec2(gl_FragCoord.xy), uPass == 1 ? ivec2(1, 0) : ivec2(0, 1)));
         return;
     }
     vec2 p = floor(gl_FragCoord.xy) * 2.0 + 1.0;
-    if (outside(p) || texelFetch(uDepth, ivec2(p), 0).r >= 1.0) {
+    if (outside(p) || texelFetch(uLinear, ivec2(gl_FragCoord.xy), 0).r >= uFar * 0.999) {
         fragColour = vec4(1.0);
         return;
     }

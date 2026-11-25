@@ -31,6 +31,7 @@ uniform sampler2D uDepth;
 uniform sampler2D uGlow;
 uniform sampler2D uAO;
 uniform sampler2D uAODepth; // the depth the ambient occlusion was made from (drawn before sprites and smoke)
+uniform sampler2D uAOLinear; // its distance at half resolution (see ssao.frag.glsl)
 uniform vec4 uView;
 uniform vec2 uProj;
 uniform float uNear;
@@ -209,7 +210,7 @@ float ambientOcclusion(vec2 p) {
     for (int y = -1; y <= 1; y++) {
         for (int x = -1; x <= 1; x++) {
             vec2 q = h + vec2(float(x), float(y));
-            float zq = linearDepth(texelFetch(uAODepth, ivec2(q * 2.0), 0).r);
+            float zq = texelFetch(uAOLinear, ivec2(q), 0).r;
             float w = exp(-abs(zq - z) / max(0.02 * z, 0.01)) * (x == 0 && y == 0 ? 2.0 : 1.0);
             sum += texelFetch(uAO, ivec2(q), 0).r * w;
             weight += w;

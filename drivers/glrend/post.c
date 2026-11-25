@@ -34,7 +34,7 @@
 enum {
     U_COLOUR, U_DEPTH, U_GLOW, U_AO, U_VIEW, U_PROJ, U_NEAR, U_FAR, U_TIME, U_SCALE, U_START, U_END, U_MAX_RADIUS,
     U_GLOW_STRENGTH, U_FLARE_STRENGTH, U_AO_STRENGTH, U_SPEED, U_SHIMMER_COUNT, U_SHIMMERS, U_GRADE, U_AO_DEPTH,
-    U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN, U_SHADOW_MAP, U_SHADOW_PROJ, U_SHADOW_VIEW, U_SHADOW_TEXEL, U_SUN_SHADING, U_NORMAL, U_SPECULAR, U_SUN_DIR, U_STAGE, U_LAMPS, U_LAMP_COUNT, U_RAIN, U_SUN_HALF, U_SUN_HALF_ON, U_WET_HALF, U_WET_HALF_ON, U_DOF_HALF,
+    U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN, U_SHADOW_MAP, U_SHADOW_PROJ, U_SHADOW_VIEW, U_SHADOW_TEXEL, U_SUN_SHADING, U_NORMAL, U_SPECULAR, U_SUN_DIR, U_STAGE, U_LAMPS, U_LAMP_COUNT, U_RAIN, U_SUN_HALF, U_SUN_HALF_ON, U_WET_HALF, U_WET_HALF_ON, U_DOF_HALF, U_AO_LINEAR,
     U_COUNT
 };
 /* (they must fit hVideo->post.uniforms) */
@@ -42,7 +42,7 @@ typedef char post_uniforms_fit[U_COUNT <= 64 ? 1 : -1];
 static const char* uniform_names[U_COUNT] = {
     "uColour", "uDepth", "uGlow", "uAO", "uView", "uProj", "uNear", "uFar", "uTime", "uScale", "uStart", "uEnd",
     "uMaxRadius", "uGlowStrength", "uFlareStrength", "uAOStrength", "uSpeed", "uShimmerCount", "uShimmers", "uGrade", "uAODepth",
-    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun", "uShadowMap", "uShadowProj", "uShadowView", "uShadowTexel", "uSunShading", "uNormal", "uSpecular", "uSunDir", "uStage", "uLamps", "uLampCount", "uRain", "uSunHalf", "uSunHalfOn", "uWetHalf", "uWetHalfOn", "uDofHalf"
+    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun", "uShadowMap", "uShadowProj", "uShadowView", "uShadowTexel", "uSunShading", "uNormal", "uSpecular", "uSunDir", "uStage", "uLamps", "uLampCount", "uRain", "uSunHalf", "uSunHalfOn", "uWetHalf", "uWetHalfOn", "uDofHalf", "uAOLinear"
 };
 enum {
     W_TO_WORLD, W_VIEW, W_PROJ, W_SIZE, W_TIME, W_SCALE, W_RAIN, W_BOX, W_DEPTH, W_NEAR, W_FAR, W_BRIGHTNESS, W_AMOUNT,
@@ -54,10 +54,11 @@ static const char* weather_uniform_names[W_COUNT] = {
     "uToWorld", "uView", "uProj", "uSize", "uTime", "uScale", "uRain", "uBox", "uDepth", "uNear", "uFar", "uBrightness", "uAmount", "uInner", "uMinPixels", "uSpray", "uSprayCount"
 };
 enum {
-    A_DEPTH, A_VIEW, A_PROJ, A_NEAR, A_FAR, A_RADIUS, A_AO, A_PASS,
+    A_DEPTH, A_VIEW, A_PROJ, A_NEAR, A_FAR, A_RADIUS, A_AO, A_PASS, A_LINEAR,
     A_COUNT
 };
-static const char* ao_uniform_names[A_COUNT] = { "uDepth", "uView", "uProj", "uNear", "uFar", "uRadius", "uAO", "uPass" };
+static const char* ao_uniform_names[A_COUNT] = { "uDepth", "uView", "uProj", "uNear", "uFar", "uRadius", "uAO", "uPass", "uLinear" };
+typedef char ao_uniforms_fit[A_COUNT <= 16 ? 1 : -1];
 
 static void delete_targets(HVIDEO hVideo) {
     glDeleteFramebuffers(1, &hVideo->post.msaaFbo);
@@ -71,8 +72,8 @@ static void delete_targets(HVIDEO hVideo) {
     glDeleteTextures(1, &hVideo->post.colourTex);
     glDeleteTextures(1, &hVideo->post.glowTex);
     glDeleteTextures(1, &hVideo->post.depthTex);
-    glDeleteFramebuffers(2, hVideo->post.aoFbo);
-    glDeleteTextures(2, hVideo->post.aoTex);
+    glDeleteFramebuffers(3, hVideo->post.aoFbo);
+    glDeleteTextures(3, hVideo->post.aoTex);
     glDeleteFramebuffers(1, &hVideo->post.aoDepthFbo);
     glDeleteTextures(1, &hVideo->post.aoDepthTex);
     glDeleteFramebuffers(1, &hVideo->post.litFbo);
@@ -90,7 +91,8 @@ static void delete_targets(HVIDEO hVideo) {
     hVideo->post.aoDepthFbo = hVideo->post.aoDepthTex = 0;
     hVideo->post.msaaFbo = hVideo->post.msaaColour = hVideo->post.msaaGlow = hVideo->post.msaaDepth = 0;
     hVideo->post.resolveFbo = hVideo->post.colourTex = hVideo->post.glowTex = hVideo->post.depthTex = 0;
-    hVideo->post.aoFbo[0] = hVideo->post.aoFbo[1] = hVideo->post.aoTex[0] = hVideo->post.aoTex[1] = 0;
+    hVideo->post.aoFbo[0] = hVideo->post.aoFbo[1] = hVideo->post.aoFbo[2] = 0;
+    hVideo->post.aoTex[0] = hVideo->post.aoTex[1] = hVideo->post.aoTex[2] = 0;
     hVideo->post.width = hVideo->post.height = 0;
 }
 
@@ -122,6 +124,7 @@ static br_error create_targets(HVIDEO hVideo, int width, int height, int samples
     }
     hVideo->post.aoTex[0] = create_texture(GL_R8, (width + 1) / 2, (height + 1) / 2, GL_RED, GL_UNSIGNED_BYTE, GL_NEAREST, 0);
     hVideo->post.aoTex[1] = create_texture(GL_R8, (width + 1) / 2, (height + 1) / 2, GL_RED, GL_UNSIGNED_BYTE, GL_NEAREST, 0);
+    hVideo->post.aoTex[2] = create_texture(GL_R32F, (width + 1) / 2, (height + 1) / 2, GL_RED, GL_FLOAT, GL_NEAREST, 0);
     hVideo->post.aoDepthTex = create_texture(GL_DEPTH_COMPONENT24, width, height, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, GL_NEAREST, 0);
 
     glGenFramebuffers(1, &hVideo->post.resolveFbo);
@@ -139,8 +142,8 @@ static br_error create_targets(HVIDEO hVideo, int width, int height, int samples
         return BRE_FAIL;
     }
 
-    glGenFramebuffers(2, hVideo->post.aoFbo);
-    for (int i = 0; i < 2; i++) {
+    glGenFramebuffers(3, hVideo->post.aoFbo);
+    for (int i = 0; i < 3; i++) {
         glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.aoFbo[i]);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, hVideo->post.aoTex[i], 0);
     }
@@ -425,14 +428,24 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glBindVertexArray(self->asFront.screen_buffer_vao);
 
     if (ao) {
-        /* ambient occlusion into aoTex[0], blurred horizontally into aoTex[1], and vertically back */
-        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.aoFbo[0]);
+        /* the distance at half resolution into aoTex[2]; ambient occlusion into aoTex[0], blurred horizontally
+         * into aoTex[1], and vertically back */
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.aoFbo[2]);
         glViewport(0, 0, (w + 1) / 2, (h + 1) / 2);
         glUseProgram(hVideo->post.aoProgram);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, ao_depth);
         glUniform1i(a[A_DEPTH], 0);
         glUniform1i(a[A_AO], 1);
+        glUniform1i(a[A_LINEAR], 2);
+        glUniform1i(a[A_PASS], 3);
+        glUniform1f(a[A_NEAR], near_z);
+        glUniform1f(a[A_FAR], far_z);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, hVideo->post.aoTex[2]);
+        glActiveTexture(GL_TEXTURE0);
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.aoFbo[0]);
         glUniform1i(a[A_PASS], 0);
         glUniform4fv(a[A_VIEW], 1, hVideo->post.view);
         glUniform2fv(a[A_PROJ], 1, hVideo->post.proj);
@@ -451,6 +464,9 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
         glActiveTexture(GL_TEXTURE0);
     }
 
+    glActiveTexture(GL_TEXTURE12);
+    glBindTexture(GL_TEXTURE_2D, hVideo->post.aoTex[2]);
+    glActiveTexture(GL_TEXTURE0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, w, h);
     glUseProgram(hVideo->post.program);
@@ -470,6 +486,7 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glUniform1i(u[U_GLOW], 2);
     glUniform1i(u[U_AO], 3);
     glUniform1i(u[U_AO_DEPTH], 4);
+    glUniform1i(u[U_AO_LINEAR], 12);
     glUniform4fv(u[U_VIEW], 1, hVideo->post.view);
     glUniform2fv(u[U_PROJ], 1, hVideo->post.proj);
     glUniform1f(u[U_NEAR], near_z);
@@ -654,6 +671,8 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     }
 
     glBindVertexArray(0);
+    glActiveTexture(GL_TEXTURE12);
+    glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE11);
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE10);
