@@ -4,6 +4,8 @@
 
 #include "drv.h"
 #include <brassert.h>
+#include <math.h>
+#include <string.h>
 
 /*
  * Default dispatch table for device (defined at end of file)
@@ -124,6 +126,51 @@ static void SetupFullScreenRectGeometry(br_device_pixelmap* self) {
     GL_CHECK_ERROR();
 }
 
+/*
+ * Which of the moved layer's regions are near each 8x8 overlay pixel cell (a bit each, 64 in four 16 bit
+ * channels): its moved place, and its own place with what the samples around reach. A pixel in a cell with none
+ * near is just the layer there (see default.frag.glsl). The layer is margin pixels wider on each side
+ */
+#define REGION_CELL 8
+static void update_region_grid(br_device_pixelmap* self, int region_count, const GLfloat* rects, const GLfloat* shifts, float margin) {
+    int gw = (int)ceilf((self->pm_width + 2.f * margin) / REGION_CELL);
+    int gh = (self->pm_height + REGION_CELL - 1) / REGION_CELL;
+    GLushort* grid = BrScratchAllocate(sizeof(GLushort) * 4 * gw * gh);
+    int i, k, x, y;
+
+    memset(grid, 0, sizeof(GLushort) * 4 * gw * gh);
+    for (i = 0; i < region_count; i++) {
+        const GLfloat* r = &rects[4 * i];
+        GLfloat around[2][4] = { { r[0] + shifts[i] - 1.f, r[1] - 1.f, r[2] + shifts[i] + 1.f, r[3] + 1.f },
+            { r[0] - 2.5f, r[1] - 2.5f, r[2] + 2.5f, r[3] + 2.5f } };
+        for (k = 0; k < 2; k++) {
+            int x0 = (int)floorf((around[k][0] + margin) / REGION_CELL), x1 = (int)floorf((around[k][2] + margin) / REGION_CELL);
+            int y0 = (int)floorf(around[k][1] / REGION_CELL), y1 = (int)floorf(around[k][3] / REGION_CELL);
+            x0 = x0 < 0 ? 0 : x0;
+            y0 = y0 < 0 ? 0 : y0;
+            x1 = x1 >= gw ? gw - 1 : x1;
+            y1 = y1 >= gh ? gh - 1 : y1;
+            for (y = y0; y <= y1; y++) {
+                for (x = x0; x <= x1; x++) {
+                    grid[4 * (y * gw + x) + i / 16] |= (GLushort)(1u << (i % 16));
+                }
+            }
+        }
+    }
+    if (self->asFront.video.defaultProgram.regionGridTex == 0) {
+        glGenTextures(1, &self->asFront.video.defaultProgram.regionGridTex);
+    }
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, self->asFront.video.defaultProgram.regionGridTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16UI, gw, gh, 0, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT, grid);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glActiveTexture(GL_TEXTURE0);
+    BrScratchFree(grid);
+}
+
 void RenderFullScreenTextureToFrameBuffer(br_device_pixelmap* self, GLuint textureId, GLuint fb, int flipVertically, int discardPurplePixels, int moved) {
 
     int x, y, i, region_count;
@@ -173,6 +220,8 @@ void RenderFullScreenTextureToFrameBuffer(br_device_pixelmap* self, GLuint textu
     if (region_count > 0) {
         glUniform4fv(self->asFront.video.defaultProgram.uRegions, region_count, rects);
         glUniform1fv(self->asFront.video.defaultProgram.uRegionShifts, region_count, shifts);
+        update_region_grid(self, region_count, rects, shifts, margin);
+        glUniform1i(self->asFront.video.defaultProgram.uRegionGrid, 1);
     }
     if (self->asFront.video.textureSharp && discardPurplePixels) {
         // sharp sampling outputs premultiplied colour with partial coverage at cut-out edges
@@ -181,6 +230,11 @@ void RenderFullScreenTextureToFrameBuffer(br_device_pixelmap* self, GLuint textu
     }
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
     glDisable(GL_BLEND);
+    if (region_count > 0) {
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glActiveTexture(GL_TEXTURE0);
+    }
 
     glBindVertexArray(0);
     glEnable(GL_DEPTH_TEST);

@@ -71,6 +71,8 @@ typedef struct _VIDEO {
         GLint uRegionCount;
         GLint uRegions;
         GLint uRegionShifts;
+        GLint uRegionGrid;
+        GLuint regionGridTex; /* the regions near each 8x8 cell of the layer, see update_region_grid */
     } defaultProgram;
 
     struct {

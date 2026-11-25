@@ -31,6 +31,7 @@ br_boolean VIDEOI_CompileDefaultShader(HVIDEO hVideo) {
         hVideo->defaultProgram.uRegionCount = glGetUniformLocation(hVideo->defaultProgram.program, "uRegionCount");
         hVideo->defaultProgram.uRegions = glGetUniformLocation(hVideo->defaultProgram.program, "uRegions");
         hVideo->defaultProgram.uRegionShifts = glGetUniformLocation(hVideo->defaultProgram.program, "uRegionShifts");
+        hVideo->defaultProgram.uRegionGrid = glGetUniformLocation(hVideo->defaultProgram.program, "uRegionGrid");
         glUseProgram(hVideo->defaultProgram.program);
     }
 

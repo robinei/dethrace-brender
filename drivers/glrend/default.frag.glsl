@@ -25,6 +25,8 @@ uniform float uLayerMargin;
 uniform int uRegionCount;
 uniform vec4 uRegions[MAX_REGIONS];
 uniform float uRegionShifts[MAX_REGIONS];
+// which of them are near each 8x8 cell of the layer (from its left margin), a bit each (see update_region_grid)
+uniform usampler2D uRegionGrid;
 
 layout (location = 0) out vec4 mainColour;
 
@@ -83,6 +85,19 @@ void main()
         vec2 p = vec2(st.x * uLayerWidth - uLayerMargin, st.y * float(size.y));
         vec2 band = max(fwidth(p), vec2(1e-5));
         ivec2 whole_hi = size - 1;
+        uvec4 near = texelFetch(uRegionGrid, clamp(ivec2(floor(vec2(p.x + uLayerMargin, p.y) / 8.0)), ivec2(0), textureSize(uRegionGrid, 0) - 1), 0);
+        if (all(equal(near, uvec4(0u)))) {
+            // (no region near: the layer as it is here, as below)
+            if (p.x < 0.0 || p.x >= float(size.x)) {
+                discard;
+            }
+            vec4 c = sampleOverlay(p, band, ivec2(0), whole_hi, size, false);
+            if (c.a <= 0.0) {
+                discard;
+            }
+            mainColour = c;
+            return;
+        }
         for (int i = 0; i < uRegionCount; i++) {
             vec2 moved = p - vec2(uRegionShifts[i], 0.0);
             if (uRegionShifts[i] != 0.0 && inRect(moved, uRegions[i])) {
