@@ -431,16 +431,16 @@ vec3 wetGround(vec2 p, vec2 size) {
     float spread = 0.003 * rough * uView.w;
     // (the glow's mip level: the puddles' reflections sharp, the damp rest's softer)
     float lod = mix(1.0, 2.6, rough);
-    // the reflection of the pixel and of those a little above and below it on the ground (the smear across
-    // them too): where the rays jump from one thing to another (from the lit windows of a building to the
+    // the reflection of two points on the ground, a little above and below the pixel (the smear across them
+    // too): where the rays jump from one thing to another (from the lit windows of a building to the
     // pavement in front of it) a short fade rather than a hard line across the smeared reflections
     vec3 sum = vec3(0.0);
     float rays = 0.0;
-    for (int r = -1; r <= 1; r++) {
-        vec2 q = p + vec2(0.0, float(r) * 2.5 * stretch);
-        vec3 Q = r == 0 ? P : viewPosition(q);
-        float wr = r == 0 ? 2.0 : 1.0;
-        if (r != 0 && (texelFetch(uDepth, ivec2(q), 0).r >= 1.0 || flatGround(q, Q) <= 0.0)) {
+    for (int r = 0; r < 2; r++) {
+        vec2 q = p + vec2(0.0, (float(r) - 0.5) * 2.5 * stretch);
+        vec3 Q = viewPosition(q);
+        float wr = 1.0;
+        if (texelFetch(uDepth, ivec2(q), 0).r >= 1.0 || flatGround(q, Q) <= 0.0) {
             continue;
         }
         rays += wr;
