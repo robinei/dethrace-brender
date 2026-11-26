@@ -75,6 +75,8 @@ typedef struct br_buffer_stored {
     GLfloat gl_anisotropy;
 
     br_boolean paletted_source_dirty;
+    br_boolean converted; /* (converted at least once) */
+    int drawnFrame; /* the frame it was last drawn in (see VIDEOI_UpdatePalettedTexture) */
     br_uint_32 palette_revision;
     struct br_device_clut *palette_pointer;
 

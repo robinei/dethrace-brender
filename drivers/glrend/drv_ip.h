@@ -36,6 +36,7 @@ br_boolean VIDEOI_CompileBRenderShader(HVIDEO hVideo, const char* vertPath, cons
 void VIDEOI_UseBRenderVariant(HVIDEO hVideo, int which);
 void VIDEOI_UseBRenderFeatures(HVIDEO hVideo, int base, unsigned features);
 void VIDEOI_BuildListedPrograms(HVIDEO hVideo, GLuint vao);
+void VIDEOI_UpdatePalettedTexture(HVIDEO hVideo, struct br_buffer_stored* buffer);
 
 GLuint VIDEO_BrPixelmapToGLTexture(br_pixelmap* pm);
 

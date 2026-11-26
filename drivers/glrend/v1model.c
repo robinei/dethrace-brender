@@ -263,6 +263,31 @@ static br_boolean update_paletted_texture(HVIDEO hVideo, br_pixelmap *src, br_ui
     return opaque;
 }
 
+/*
+ * A paletted texture (with the texture bound) brought up to date with its source and the palette: converted to 32
+ * bits, and its glow mask, when it changed. See also updateMemory in sbuffer.c, which does it at once for a
+ * texture changed between frames
+ */
+void VIDEOI_UpdatePalettedTexture(HVIDEO hVideo, br_buffer_stored* buffer) {
+    buffer->drawnFrame = hVideo->frame;
+    // has the 8 bit color source changed?
+    if (buffer->paletted_source_dirty == BR_TRUE) {
+        buffer->opaque = update_paletted_texture(hVideo, buffer->source, buffer->palette_pointer->entries);
+        buffer->paletted_source_dirty = BR_FALSE;
+        buffer->palette_revision = buffer->palette_pointer->revision;
+        buffer->converted = BR_TRUE;
+    }
+    // or has the palette changed?
+    else if (buffer->palette_pointer != NULL && buffer->palette_revision != buffer->palette_pointer->revision) {
+        buffer->opaque = update_paletted_texture(hVideo, buffer->source, buffer->palette_pointer->entries);
+        buffer->palette_revision = buffer->palette_pointer->revision;
+    }
+
+    if (!buffer->glow_checked) {
+        update_glow_texture(hVideo, buffer);
+    }
+}
+
 static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t states, shader_data_model* model, GLuint tex_default) {
     br_boolean blending_on;
     br_boolean keep_alpha;
@@ -382,21 +407,7 @@ static void apply_stored_properties(HVIDEO hVideo, state_stack* state, uint32_t 
 
             glBindTexture(GL_TEXTURE_2D, BufferStoredGLGetTexture(state->prim.colour_map));
 
-            // has the 8 bit color source changed?
-            if (state->prim.colour_map->paletted_source_dirty == BR_TRUE) {
-                state->prim.colour_map->opaque = update_paletted_texture(hVideo, state->prim.colour_map->source, state->prim.colour_map->palette_pointer->entries);
-                state->prim.colour_map->paletted_source_dirty = BR_FALSE;
-                state->prim.colour_map->palette_revision = state->prim.colour_map->palette_pointer->revision;
-            }
-            // or has the palette changed?
-            else if (state->prim.colour_map->palette_pointer != NULL && state->prim.colour_map->palette_revision != state->prim.colour_map->palette_pointer->revision) {
-                state->prim.colour_map->opaque = update_paletted_texture(hVideo, state->prim.colour_map->source, state->prim.colour_map->palette_pointer->entries);
-                state->prim.colour_map->palette_revision = state->prim.colour_map->palette_pointer->revision;
-            }
-
-            if (!state->prim.colour_map->glow_checked) {
-                update_glow_texture(hVideo, state->prim.colour_map);
-            }
+            VIDEOI_UpdatePalettedTexture(hVideo, state->prim.colour_map);
             if (!state->prim.colour_map->reflect_checked) {
                 br_pixelmap* src = state->prim.colour_map->source;
                 state->prim.colour_map->reflect_checked = BR_TRUE;

@@ -194,6 +194,15 @@ static br_error updateMemory(br_buffer_stored* self, br_pixelmap* pm) {
         self->paletted_source_dirty = BR_TRUE;
         self->glow_checked = BR_FALSE;
         self->palette_pointer = ObjectDevice(self)->clut;
+        if (self->converted && self->renderer != NULL && self->renderer->pixelmap != NULL
+            && self->renderer->pixelmap->screen->asFront.video.frame - self->drawnFrame <= 1) {
+            /* changed again (animated) and drawn the last frame: converted now, between the frames, rather than
+             * when next drawn, in the middle of a scene, where the upload ended the GPU's pass (on a tiled one:
+             * the targets stored and loaded again). (Those out of sight are left until drawn) */
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, self->gl_tex);
+            VIDEOI_UpdatePalettedTexture(&self->renderer->pixelmap->screen->asFront.video, self);
+        }
     } else if (pm->type == BR_PMT_RGB_565) {
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, pm->width, pm->height, format, type, pm->pixels);
         /* (black is the colour key, see brender.frag.glsl) */

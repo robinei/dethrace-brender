@@ -528,6 +528,7 @@ br_error BR_CMETHOD_DECL(br_device_pixelmap_glf, doubleBuffer)(br_device_pixelma
     BrPixelmapFlush((br_pixelmap*)src);
 
     DevicePixelmapGLSwapBuffers(self);
+    self->asFront.video.frame++;
 
     // prep for next frame
     BrRendererFrameBegin();

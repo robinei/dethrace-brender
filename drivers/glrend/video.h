@@ -167,6 +167,7 @@ typedef struct _VIDEO {
     int programListRead, programsBuilt; /* the program list read; its programs built (VIDEOI_BuildListedPrograms) */
     /* the scene's uniforms, given to each program the first time it is used in the scene (see sceneBegin) */
     int sceneSerial;
+    int frame; /* frames shown (see doubleBuffer in devpmglf.c) */
     float sceneBrightness;
     float sceneSurfaceValues[BR_GL_SCENE_SURFACE_FLOATS];
     /*
