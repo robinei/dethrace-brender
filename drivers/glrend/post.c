@@ -522,8 +522,9 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glDisable(GL_SAMPLE_SHADING);
     glBindVertexArray(self->asFront.screen_buffer_vao);
 
-    /* (for the ambient occlusion, and the reflections' march) */
-    if (ao || (hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0 && (params->ice > 0.0f || params->water > 0.0f || params->paint > 0.0f))) {
+    /* (for the ambient occlusion, and the reflections' march: the mirrors' and the wet ground's) */
+    if (ao || (hVideo->post.glowTex != 0 && hVideo->post.viewArea > 0
+            && (params->ice > 0.0f || params->water > 0.0f || params->paint > 0.0f || params->wet > 0.0f))) {
         /* the distance at half resolution into aoTex[2] */
         glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.aoFbo[2]);
         glViewport(0, 0, (w + 1) / 2, (h + 1) / 2);
