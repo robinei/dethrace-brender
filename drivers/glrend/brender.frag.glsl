@@ -257,6 +257,11 @@ float valueNoise(vec3 x) {
     return texture(noise_texture, (i + f + 0.5) / NOISE_SIZE).r;
 }
 
+// The texture coordinates' screen derivatives: worked out in main, outside any branch (in one, where not all of
+// a quad's pixels take it, they are undefined)
+vec2 uvDx;
+vec2 uvDy;
+
 // Relief: the texture's brightness taken as height (bright is raised), how much brighter or darker the sun makes
 // the surface by it, by the normal tilted along its gradient (without tangents: from the screen derivatives).
 // Fades out where the texture is minified, where it would only shimmer. Read around `at` (uv, or snapped to
@@ -264,8 +269,8 @@ float valueNoise(vec3 x) {
 float relief(vec3 p, vec3 n, vec2 uv, vec2 at) {
     vec2 size = vec2(textureSize(main_texture, 0));
     // (the derivatives of the unsnapped coordinates, for the mip level and the screen to texture mapping)
-    vec2 dx = dFdx(uv);
-    vec2 dy = dFdy(uv);
+    vec2 dx = uvDx;
+    vec2 dy = uvDy;
     float texels = max(length(dx * size), length(dy * size));
     float fade = 1.0 - smoothstep(0.8, 2.5, texels);
     if (fade <= 0.0) {
@@ -546,6 +551,8 @@ void main() {
     // where the relief reads the texture: with the sharp filter, snapped like the colour, so it is flat within
     // each texel too (each a little tile tilted its own way) and the texels stay square
     vec2 reliefUV = mappedUV;
+    uvDx = dFdx(mappedUV);
+    uvDy = dFdy(mappedUV);
 
     if (disable_texture) {
         // Lit, non-prelit vertices already include the material colour.
@@ -560,7 +567,7 @@ void main() {
             vec2 seam = floor(texel + 0.5);
             vec2 band = max(fwidth(texel), vec2(1e-5));
             vec2 snapped = (seam + clamp((texel - seam) / band, -0.5, 0.5)) / size;
-            textureColour = textureGrad(main_texture, snapped, dFdx(mappedUV), dFdy(mappedUV));
+            textureColour = textureGrad(main_texture, snapped, uvDx, uvDy);
             reliefUV = snapped;
         } else {
             textureColour = texture(main_texture, mappedUV);
@@ -571,8 +578,8 @@ void main() {
         if (F_SOFT && surface_soft) {
             // the cut out shape, blurred (two mip levels coarser), un-premultiplied, and faded towards the quad's
             // rim, so no hard border shows
-            float lod = log2(max(max(length(dFdx(mappedUV) * vec2(textureSize(main_texture, 0))),
-                                     length(dFdy(mappedUV) * vec2(textureSize(main_texture, 0)))), 1e-4));
+            float lod = log2(max(max(length(uvDx * vec2(textureSize(main_texture, 0))),
+                                     length(uvDy * vec2(textureSize(main_texture, 0)))), 1e-4));
             vec4 soft = textureLod(main_texture, mappedUV, max(lod, 0.0) + 2.0);
             textureColour.rgb = soft.rgb / max(soft.a, 0.05);
             vec2 q = fract(mappedUV) * 2.0 - 1.0;
