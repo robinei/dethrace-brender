@@ -774,8 +774,8 @@ void BR_PUBLIC_ENTRY BrGLPostProcessDepthSnapshot(br_pixelmap* screen) {
         return;
     }
     hVideo = &self->asFront.video;
-    /* (multisampled, with soft particles: they take it, from the scene resolved, see BrGLPostProcessSoftParticles) */
-    if (!hVideo->post.active || hVideo->post.aoDepthFbo == 0 || (hVideo->post.samples > 0 && hVideo->post.softParticlesSeen)) {
+    /* (with soft particles: they take it, see BrGLPostProcessSoftParticles) */
+    if (!hVideo->post.active || hVideo->post.aoDepthFbo == 0 || hVideo->post.softParticlesSeen) {
         return;
     }
     w = hVideo->post.width;
@@ -831,6 +831,23 @@ void BR_PUBLIC_ENTRY BrGLPostProcessSoftParticles(br_pixelmap* screen, float dis
         if (scissor) {
             glEnable(GL_SCISSOR_TEST);
         }
+        GL_CHECK_ERROR();
+    } else if (hVideo->post.active && hVideo->post.samples == 0 && distance > 0.0f && !hVideo->post.tail && hVideo->post.aoDepthFbo != 0) {
+        /* (single sampled) the same: the depth taken here, where the pass is split once either way, rather than at
+         * the snapshot, before the sprites, the sky and the translucent track (drawn in a pass of their own) */
+        int w = hVideo->post.width, h = hVideo->post.height;
+        GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+        glDisable(GL_SCISSOR_TEST);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, hVideo->post.resolveFbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, hVideo->post.aoDepthFbo);
+        glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.resolveFbo);
+        if (scissor) {
+            glEnable(GL_SCISSOR_TEST);
+        }
+        hVideo->post.tail = 1;
+        hVideo->post.depthSnapshot = 1;
+        hVideo->post.softParticlesSeen = 1;
         GL_CHECK_ERROR();
     }
 }
