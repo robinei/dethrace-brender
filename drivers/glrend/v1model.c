@@ -593,7 +593,7 @@ static void draw_spots(HVIDEO hVideo, struct v11model* model, br_matrix34* m2v) 
         float reach = (range >= 0.0f ? range : -1.3f * range) + r;
         float dx = light[0] - c.v[0], dy = light[1] - c.v[1], dz = light[2] - c.v[2];
         int reaches = dx * dx + dy * dy + dz * dz < reach * reach;
-        if (!reaches && range > 0.0f && light[11] > 0.0f) {
+        if (!reaches && range > 0.0f && (light[11] > 0.0f || hVideo->sceneLightPostHaze[i])) {
             /* (the nearest point to it of the line from the eye to the centre) */
             float t = cc > 0.0f ? (light[0] * c.v[0] + light[1] * c.v[1] + light[2] * c.v[2]) / cc : 0.0f;
             t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);

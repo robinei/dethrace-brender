@@ -29,6 +29,14 @@ uniform bool uWetHalfOn;
 uniform sampler2D uDofHalf;
 // the bloom and the lens flare (their strengths in), half resolution (stage 6)
 uniform sampler2D uGlowHalf;
+// the scene's lights whose beams light up the air (the headlights), as brender.frag.glsl's spots: view space
+// position and range, direction (and cone) and strength, colour and haze
+uniform vec4 uSpots[3 * 32];
+uniform int uSpotCount;
+// the haze around the lamps and in the headlights' beams at half resolution (stage 7 draws it), and whether there
+// is any
+uniform sampler2D uHazeHalf;
+uniform bool uHazeHalfOn;
 // lamps (street lamps, neon, signs) the air glows around at night: view space position and the reach of the glow,
 // colour and strength
 uniform vec4 uLamps[48];
@@ -942,6 +950,76 @@ vec3 lampHaze(vec2 p) {
     return 0.6 * (1.0 - exp(-sum / 0.6));
 }
 
+// The cone of a light at the direction from_light (see spotCone in brender.frag.glsl)
+float spotCone(vec3 from_light, vec4 dir) {
+    float k = dot(dir.xyz, dir.xyz);
+    if (k < 0.25) {
+        return 1.0;
+    }
+    return k > 2.0 ? smoothstep(0.25, 0.75, dot(from_light, dir.xyz) * 0.5) : smoothstep(0.82, 0.95, dot(from_light, dir.xyz));
+}
+
+// Light scattered towards the eye by the air in the headlights' beams in front of view space point P: for each,
+// the integral of 1/distance^2 along the view ray, weighted by the cone at the ray's closest point to the light
+vec3 spotHaze(vec3 P) {
+    vec3 sum = vec3(0.0);
+    float len = length(P);
+    vec3 r = P / max(len, 0.0001);
+    for (int i = 0; i < uSpotCount; i++) {
+        vec3 c = uSpots[3 * i].xyz;
+        float range = uSpots[3 * i].w;
+        float b = dot(c, r);
+        float h = sqrt(max(dot(c, c) - b * b, 0.0004));
+        float scatter = (atan((len - b) / h) + atan(b / h)) / h;
+        vec3 q = r * clamp(b, 0.0, len);
+        vec3 from_light = q - c;
+        float d = length(from_light);
+        float falloff = clamp(1.0 - d / range, 0.0, 1.0);
+        sum += uSpots[3 * i + 2].rgb * (uSpots[3 * i + 2].w * scatter * falloff * spotCone(from_light / max(d, 0.0001), uSpots[3 * i + 1]));
+    }
+    return sum;
+}
+
+// the lamps' and the headlights' haze at window pixel p
+vec3 haze(vec2 p) {
+    vec3 c = vec3(0.0);
+    if (uLampCount > 0) {
+        c += lampHaze(p);
+    }
+    if (uSpotCount > 0) {
+        c += spotHaze(viewPosition(p));
+    }
+    return c;
+}
+
+// haze at window pixel p: drawn at half resolution (stage 7: of every other pixel), taken from the four half
+// resolution pixels around, bilinear and by how near their distances are to this one's (it changes sharply only
+// where the distance does)
+vec3 hazeAt(vec2 p) {
+    float z = linearDepth(texelFetch(uDepth, ivec2(p), 0).r);
+    vec2 h = p * 0.5 - 0.5;
+    vec2 f = fract(h);
+    ivec2 base = ivec2(floor(h));
+    ivec2 last = textureSize(uHazeHalf, 0) - 1;
+    vec3 sum = vec3(0.0);
+    vec3 plain = vec3(0.0);
+    float weight = 0.0;
+    for (int y = 0; y <= 1; y++) {
+        for (int x = 0; x <= 1; x++) {
+            ivec2 q = clamp(base + ivec2(x, y), ivec2(0), last);
+            float zq = linearDepth(texelFetch(uDepth, q * 2 + 1, 0).r);
+            float b = (x == 1 ? f.x : 1.0 - f.x) * (y == 1 ? f.y : 1.0 - f.y);
+            float w = (b + 0.01) * exp(-abs(zq - z) / max(0.02 * z, 0.01));
+            vec3 t = texelFetch(uHazeHalf, q, 0).rgb;
+            sum += t * w;
+            plain += t * b;
+            weight += w;
+        }
+    }
+    // (nothing at a like distance near: bilinear)
+    return weight > 0.0001 ? sum / weight : plain;
+}
+
 // The scene lit: ambient occlusion, the sun's shadows and highlights, reflections, wet ground
 vec3 litScene(vec2 p, vec2 size) {
     vec3 c = texelFetch(uColour, ivec2(p), 0).rgb;
@@ -966,8 +1044,8 @@ vec3 litScene(vec2 p, vec2 size) {
     if (uWet > 0.0) {
         c += wetGroundAt(p, size);
     }
-    if (uLampCount > 0) {
-        c += lampHaze(p);
+    if (uHazeHalfOn) {
+        c += hazeAt(p);
     }
     return c;
 }
@@ -978,6 +1056,11 @@ void main() {
     if (STAGE == 3) {
         // (every other pixel's, see sunMapsAt)
         fragColour = vec4(sunMaps(floor(p) * 2.0 + 1.0));
+        return;
+    }
+    if (STAGE == 7) {
+        // (every other pixel's, see hazeAt)
+        fragColour = vec4(haze(floor(p) * 2.0 + 1.0), 1.0);
         return;
     }
     if (STAGE == 6) {

@@ -79,7 +79,7 @@ typedef struct brender_variant {
 /* post.frag's passes (its stages): 0 all at once, 1 the lit scene, 2 the blurs and the rest of it, 3 the sun's
  * shadow at half resolution, 4 the wet ground's reflections at half resolution, 5 the depth of field at half
  * resolution, 6 the bloom and lens flare at half resolution */
-#define POST_STAGES 7
+#define POST_STAGES 8
 
 typedef struct _VIDEO {
     GLint maxUniformBlockSize;
@@ -179,6 +179,9 @@ typedef struct _VIDEO {
         GLint blendFunc[4];
     } drawState;
     const float* sceneLights; /* the scene's lights (spots), as the scene_lighting callback gave them */
+    float sceneLightsNoHaze[BR_GL_SCENE_LIGHT_FLOATS * BR_GL_MAX_SCENE_LIGHTS]; /* (them, their haze the post's) */
+    char sceneLightPostHaze[BR_GL_MAX_SCENE_LIGHTS]; /* (those whose haze is the post's: they still reach what is
+                                                      * beyond them along the view, see draw_spots) */
     int drawSpots[BR_GL_MAX_SCENE_LIGHTS], drawSpotCount; /* those that reach what is being drawn (see draw_spots) */
     unsigned drawSpotKinds; /* what they are: BRF_LIGHTS, BRF_BLOBS, BRF_LIGHT_HAZE */
     int sceneLightCount;
@@ -220,6 +223,12 @@ typedef struct _VIDEO {
         GLuint wetFbo, wetTex; /* the wet ground's reflections, half resolution (made when first needed) */
         GLuint dofFbo, dofTex; /* the depth of field's blur, half resolution (made when first needed) */
         GLuint glowHalfFbo, glowHalfTex; /* the bloom and lens flare, half resolution (made when first needed) */
+        GLuint hazeFbo, hazeTex; /* the haze around the lamps and headlights, half resolution (made when first needed) */
+        int hazeHalf; /* drawn this frame */
+        /* the scene's lights whose beams light up the air (the headlights): their haze is the post-processing's
+         * (see sceneBegin), as the scene has them (BR_GL_SCENE_LIGHT_FLOATS each) */
+        int spotCount;
+        float spots[BR_GL_SCENE_LIGHT_FLOATS * BR_GL_MAX_SCENE_LIGHTS];
         int depthSnapshot;
         GLuint sceneFbo; /* the framebuffer the scene is being drawn into: msaaFbo, or resolveFbo (see tail) */
         int tail; /* (multisampled) the scene resolved, the rest of it drawn single sampled, see BrGLPostProcessSoftParticles */

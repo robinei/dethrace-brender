@@ -37,6 +37,7 @@ enum {
     U_COLOUR, U_DEPTH, U_GLOW, U_AO, U_VIEW, U_PROJ, U_NEAR, U_FAR, U_TIME, U_SCALE, U_START, U_END, U_MAX_RADIUS,
     U_GLOW_STRENGTH, U_FLARE_STRENGTH, U_AO_STRENGTH, U_SPEED, U_SHIMMER_COUNT, U_SHIMMERS, U_GRADE, U_AO_DEPTH,
     U_WET, U_UP, U_ICE, U_WATER, U_TO_WORLD, U_PAINT, U_SUN, U_SHADOW_MAP, U_SHADOW_PROJ, U_SHADOW_VIEW, U_SHADOW_TEXEL, U_SUN_SHADING, U_NORMAL, U_SPECULAR, U_SUN_DIR, U_STAGE, U_LAMPS, U_LAMP_COUNT, U_RAIN, U_SUN_HALF, U_SUN_HALF_ON, U_WET_HALF, U_WET_HALF_ON, U_DOF_HALF, U_AO_LINEAR, U_GLOW_HALF,
+    U_SPOTS, U_SPOT_COUNT, U_HAZE_HALF, U_HAZE_HALF_ON,
     U_COUNT
 };
 /* (they must fit hVideo->post.stageUniforms) */
@@ -44,7 +45,8 @@ typedef char post_uniforms_fit[U_COUNT <= 64 ? 1 : -1];
 static const char* uniform_names[U_COUNT] = {
     "uColour", "uDepth", "uGlow", "uAO", "uView", "uProj", "uNear", "uFar", "uTime", "uScale", "uStart", "uEnd",
     "uMaxRadius", "uGlowStrength", "uFlareStrength", "uAOStrength", "uSpeed", "uShimmerCount", "uShimmers", "uGrade", "uAODepth",
-    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun", "uShadowMap", "uShadowProj", "uShadowView", "uShadowTexel", "uSunShading", "uNormal", "uSpecular", "uSunDir", "uStage", "uLamps", "uLampCount", "uRain", "uSunHalf", "uSunHalfOn", "uWetHalf", "uWetHalfOn", "uDofHalf", "uAOLinear", "uGlowHalf"
+    "uWet", "uUp", "uIce", "uWater", "uToWorld", "uPaint", "uSun", "uShadowMap", "uShadowProj", "uShadowView", "uShadowTexel", "uSunShading", "uNormal", "uSpecular", "uSunDir", "uStage", "uLamps", "uLampCount", "uRain", "uSunHalf", "uSunHalfOn", "uWetHalf", "uWetHalfOn", "uDofHalf", "uAOLinear", "uGlowHalf",
+    "uSpots", "uSpotCount", "uHazeHalf", "uHazeHalfOn"
 };
 enum {
     W_TO_WORLD, W_VIEW, W_PROJ, W_SIZE, W_TIME, W_SCALE, W_RAIN, W_BOX, W_DEPTH, W_NEAR, W_FAR, W_BRIGHTNESS, W_AMOUNT,
@@ -93,6 +95,9 @@ static void delete_targets(HVIDEO hVideo) {
     glDeleteFramebuffers(1, &hVideo->post.glowHalfFbo);
     glDeleteTextures(1, &hVideo->post.glowHalfTex);
     hVideo->post.glowHalfFbo = hVideo->post.glowHalfTex = 0;
+    glDeleteFramebuffers(1, &hVideo->post.hazeFbo);
+    glDeleteTextures(1, &hVideo->post.hazeTex);
+    hVideo->post.hazeFbo = hVideo->post.hazeTex = 0;
     hVideo->post.aoDepthFbo = hVideo->post.aoDepthTex = 0;
     hVideo->post.msaaFbo = hVideo->post.msaaColour = hVideo->post.msaaGlow = hVideo->post.msaaDepth = 0;
     hVideo->post.resolveFbo = hVideo->post.colourTex = hVideo->post.glowTex = hVideo->post.depthTex = 0;
@@ -366,6 +371,7 @@ br_error BR_PUBLIC_ENTRY BrGLPostProcessBegin(br_pixelmap* screen, br_boolean gl
         glDrawBuffers(1, colour_only);
     }
     hVideo->post.viewArea = 0;
+    hVideo->post.spotCount = 0;
     hVideo->post.depthSnapshot = 0;
     hVideo->post.softDistance = 0.0f;
     hVideo->post.active = 1;
@@ -438,6 +444,15 @@ static void post_uniforms(HVIDEO hVideo, const GLint* u, const br_gl_post_params
     glUniform1i(u[U_WET_HALF], 10);
     glUniform1i(u[U_DOF_HALF], 11);
     glUniform1i(u[U_GLOW_HALF], 13);
+    {
+        int spots = hVideo->post.viewArea > 0 ? hVideo->post.spotCount : 0;
+        glUniform1i(u[U_SPOT_COUNT], spots);
+        if (spots > 0) {
+            glUniform4fv(u[U_SPOTS], 3 * spots, hVideo->post.spots);
+        }
+    }
+    glUniform1i(u[U_HAZE_HALF], 14);
+    glUniform1i(u[U_HAZE_HALF_ON], hVideo->post.hazeHalf);
 }
 
 /* Draws the post-processing's pass `stage` with its program; what the passes before it made, as flags */
@@ -589,9 +604,36 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     glActiveTexture(GL_TEXTURE8);
     glBindTexture(GL_TEXTURE_2D, hVideo->post.normalTex);
     glActiveTexture(GL_TEXTURE0);
+    /* the haze around the lamps and in the headlights' beams at half resolution, into hazeTex (see hazeAt in
+     * post.frag.glsl) */
+    hVideo->post.hazeHalf = hVideo->post.viewArea > 0 && (params->lamp_count > 0 || hVideo->post.spotCount > 0);
+    if (hVideo->post.hazeHalf && hVideo->post.hazeTex == 0) {
+        hVideo->post.hazeTex = create_texture(GL_R11F_G11F_B10F, (w + 1) / 2, (h + 1) / 2, GL_RGB, GL_HALF_FLOAT, GL_NEAREST, 0);
+        glGenFramebuffers(1, &hVideo->post.hazeFbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.hazeFbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, hVideo->post.hazeTex, 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            BR_WARNING0("GLREND: post-processing haze framebuffer incomplete, the haze around lights left out");
+            glDeleteFramebuffers(1, &hVideo->post.hazeFbo);
+            glDeleteTextures(1, &hVideo->post.hazeTex);
+            hVideo->post.hazeFbo = hVideo->post.hazeTex = 0;
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+    hVideo->post.hazeHalf = hVideo->post.hazeHalf && hVideo->post.hazeTex != 0;
     for (int stage = 0; stage < POST_STAGES; stage++) {
         glUseProgram(hVideo->post.stagePrograms[stage]);
         post_uniforms(hVideo, hVideo->post.stageUniforms[stage], params, w, h, ao, near_z, far_z);
+    }
+    if (hVideo->post.hazeHalf) {
+        glBindFramebuffer(GL_FRAMEBUFFER, hVideo->post.hazeFbo);
+        glViewport(0, 0, (w + 1) / 2, (h + 1) / 2);
+        post_stage(hVideo, 7, 0, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, w, h);
+        glActiveTexture(GL_TEXTURE14);
+        glBindTexture(GL_TEXTURE_2D, hVideo->post.hazeTex);
+        glActiveTexture(GL_TEXTURE0);
     }
     /*
      * The sun's shadow from its maps (the costly part: the search and filter in them) at half resolution, into
@@ -729,6 +771,8 @@ void BR_PUBLIC_ENTRY BrGLPostProcessEnd(br_pixelmap* screen, const br_gl_post_pa
     }
 
     glBindVertexArray(0);
+    glActiveTexture(GL_TEXTURE14);
+    glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE13);
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE12);
