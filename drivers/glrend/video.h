@@ -180,8 +180,6 @@ typedef struct _VIDEO {
     } drawState;
     const float* sceneLights; /* the scene's lights (spots), as the scene_lighting callback gave them */
     float sceneLightsNoHaze[BR_GL_SCENE_LIGHT_FLOATS * BR_GL_MAX_SCENE_LIGHTS]; /* (them, their haze the post's) */
-    char sceneLightPostHaze[BR_GL_MAX_SCENE_LIGHTS]; /* (those whose haze is the post's: they still reach what is
-                                                      * beyond them along the view, see draw_spots) */
     int drawSpots[BR_GL_MAX_SCENE_LIGHTS], drawSpotCount; /* those that reach what is being drawn (see draw_spots) */
     unsigned drawSpotKinds; /* what they are: BRF_LIGHTS, BRF_BLOBS, BRF_LIGHT_HAZE */
     int sceneLightCount;

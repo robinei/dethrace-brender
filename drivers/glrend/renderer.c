@@ -144,7 +144,6 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
         }
         hVideo->sceneLights = lights;
         hVideo->sceneLightCount = lights != NULL ? count : 0;
-        memset(hVideo->sceneLightPostHaze, 0, sizeof(hVideo->sceneLightPostHaze));
         if (hVideo->post.active && !hVideo->shadow.active && hVideo->sceneLightCount > 0) {
             /* post-processed: the haze in the headlights' beams is drawn there, once a pixel at half resolution
              * (see hazeAt in post.frag.glsl), rather than by every fragment drawn (the scene's lights: the 3d
@@ -156,7 +155,6 @@ static void BR_CMETHOD_DECL(br_renderer_gl, sceneBegin)(br_renderer* self) {
                 if (light[3] > 0.0f && light[11] > 0.0f) {
                     memcpy(hVideo->post.spots + BR_GL_SCENE_LIGHT_FLOATS * hVideo->post.spotCount, light, sizeof(float) * BR_GL_SCENE_LIGHT_FLOATS);
                     hVideo->post.spotCount++;
-                    hVideo->sceneLightPostHaze[i] = 1;
                     light[11] = 0.0f;
                 }
             }
