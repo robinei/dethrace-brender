@@ -565,7 +565,8 @@ void main() {
             vec2 size = vec2(textureSize(main_texture, 0));
             vec2 texel = mappedUV * size;
             vec2 seam = floor(texel + 0.5);
-            vec2 band = max(fwidth(texel), vec2(1e-5));
+            // (fwidth(texel) from the coordinates' derivatives: two fewer derivatives, the same but for rounding)
+            vec2 band = max((abs(uvDx) + abs(uvDy)) * size, vec2(1e-5));
             vec2 snapped = (seam + clamp((texel - seam) / band, -0.5, 0.5)) / size;
             textureColour = textureGrad(main_texture, snapped, uvDx, uvDy);
             reliefUV = snapped;
