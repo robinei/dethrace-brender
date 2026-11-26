@@ -452,8 +452,9 @@ vec3 wetGround(vec2 p, vec2 size) {
         }
         hit += shift;
         vec3 one = vec3(0.0);
-        for (int k = -4; k <= 4; k++) {
-            float weight = 1.0 - abs(float(k)) / 5.0;
+        // (every other tap along the smear: 5 reads, weighted to the same sum as the 9 they stand for)
+        for (int k = -4; k <= 4; k += 2) {
+            float weight = (1.0 - abs(float(k)) / 5.0) * (5.0 / 2.6);
             float side = (fract(float(k) * 0.618 + 0.31) - 0.5) * 2.0;
             one += textureLod(uGlow, (hit + vec2(side * spread, float(k) * stretch)) / size, lod).rgb * weight;
         }
